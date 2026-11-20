@@ -31,6 +31,7 @@ const configured=!SUPABASE_URL.startsWith("PASTE");
 const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
 const STATUS=[["want","Want to Read"],["reading","Reading"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
+  const TABS=[["active","Reading + Want to Read"],["want","Want to Read"],["reading","Reading"],["done","Completed"]];
   const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
 const arr=s=>(s||"").split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
 const blank={title:"",cover_url:"",format:"Manhwa",genres:[],synopsis:"",status:"want",excitement:0,priority:false,source:"",media:[],tags:[],warnings:"",notes:"",rating:null,review:"",pub_status:""};
@@ -71,7 +72,7 @@ function Card({s,onOpen,drag,readOnly}){
   return <article draggable={!readOnly&&!!drag} {...(drag||{})} onClick={()=>onOpen(s)} className={"group cursor-pointer rounded-2xl overflow-hidden bg-white dark:bg-white/5 transition hover:-translate-y-1 "+(s.priority?"ring-2 ring-amber-400 shadow-[0_8px_30px_rgba(242,179,61,.3)]":"shadow-sm hover:shadow-lg")}>
     <div className="relative aspect-[2/3] bg-plum/10">
       {s.cover_url?<img src={s.cover_url} alt="" loading="lazy" className="w-full h-full object-cover"/>:<div className="h-full grid place-items-center p-4 text-center font-bold opacity-60">{s.title}</div>}
-      <span className="absolute top-2 left-2 text-xs font-bold rounded-full px-2 py-0.5 bg-black/60 text-white">{s.format}</span>
+      <span className="absolute top-2 left-2 text-xs font-bold rounded-full px-2 py-0.5 bg-black/60 text-white">{s.format}{s.status==="reading"?" · Reading":""}</span>
       {s.priority&&<span className="absolute top-2 right-2 rounded-full bg-amber-400 text-black text-xs font-bold px-2 py-0.5">★ Top pick</span>}
     </div>
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
@@ -144,7 +145,7 @@ function malImport(xml,uid){
 }
 
 function Tracker({user,dark,setDark}){
-  const [items,setItems]=useState([]),[tab,setTab]=useState("want"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState("");
+  const [items,setItems]=useState([]),[tab,setTab]=useState("active"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState("");
   const dragIdx=useRef(null),fileRef=useRef();
   const load=async()=>{const {data}=await sb.from("series").select("*").order("position");setItems(data||[])};
   useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
@@ -155,7 +156,7 @@ function Tracker({user,dark,setDark}){
   const del=async s=>{await sb.from("series").delete().eq("id",s.id);setOpen(null);load()};
   const link=async id=>{await sb.from("profiles").upsert({user_id:user.id,is_public:true});
     const url=location.href.split("#")[0]+"#/share/"+user.id+(id?"/"+id:"");await navigator.clipboard.writeText(url).catch(()=>prompt("Copy this link",url));say("Link copied")};
-  const visible=useMemo(()=>applyF(items.filter(i=>i.status===tab),f),[items,tab,f]);
+  const visible=useMemo(()=>applyF(items.filter(i=>tab==="active"?i.status!=="done":i.status===tab),f),[items,tab,f]);
   const canDrag=f===emptyF||JSON.stringify(f)===JSON.stringify(emptyF);
   const drop=async to=>{const from=dragIdx.current;if(from==null||from===to)return;
     const list=[...visible];const [m]=list.splice(from,1);list.splice(to,0,m);
@@ -168,15 +169,14 @@ function Tracker({user,dark,setDark}){
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
     <header className="flex flex-wrap items-center gap-3 justify-between"><h1 className="text-4xl font-extrabold tracking-tight">Page Turner</h1>
       <div className="flex gap-2 flex-wrap">
-        <button onClick={()=>setOpen({...blank,status:tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
+        <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         <button onClick={()=>fileRef.current.click()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Import MAL</button>
         <input ref={fileRef} type="file" accept=".xml" hidden onChange={onFile}/>
         <button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2" aria-label="Toggle theme">{dark?"☀":"☾"}</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button></div></header>
-    <nav className="flex gap-2">{STATUS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>i.status===k).length}</span></button>)}</nav>
-    <Filters f={f} setF={setF} items={items}/>
-    {tab==="want"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
+<nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>    <Filters f={f} setF={setF} items={items}/>
+    {(tab==="want"||tab==="active")&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
     {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {visible.map((s,i)=><Card key={s.id} s={s} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
