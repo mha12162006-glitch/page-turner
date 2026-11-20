@@ -31,15 +31,16 @@ const configured=!SUPABASE_URL.startsWith("PASTE");
 const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
 const STATUS=[["want","Want to Read"],["reading","Reading"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
+  const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
 const arr=s=>(s||"").split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
-const blank={title:"",cover_url:"",format:"Manhwa",genres:[],synopsis:"",status:"want",excitement:0,priority:false,source:"",media:[],tags:[],warnings:"",notes:"",rating:null,review:""};
+const blank={title:"",cover_url:"",format:"Manhwa",genres:[],synopsis:"",status:"want",excitement:0,priority:false,source:"",media:[],tags:[],warnings:"",notes:"",rating:null,review:"",pub_status:""};
 const isImg=u=>/\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(u)||/pinimg|googleusercontent|gstatic/.test(u);
 
 async function searchAniList(q){
-  const query=`query($s:String){Page(perPage:8){media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english} coverImage{large} countryOfOrigin genres tags{name isMediaSpoiler} description(asHtml:false)}}}`;
+  const query=`query($s:String){Page(perPage:8){media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english} coverImage{large} countryOfOrigin genres tags{name isMediaSpoiler} description(asHtml:false) status}}}`;
   const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query,variables:{s:q}})});
   return (await r.json()).data.Page.media.map(m=>({
-    anilist_id:m.id,title:m.title.english||m.title.romaji,cover_url:m.coverImage.large,
+    anilist_id:m.id,pub_status:{FINISHED:"Completed",RELEASING:"Ongoing",NOT_YET_RELEASED:"Not yet released",CANCELLED:"Discontinued",HIATUS:"On hiatus"}[m.status]||"",title:m.title.english||m.title.romaji,cover_url:m.coverImage.large,
     format:m.countryOfOrigin==="KR"?"Manhwa":["CN","TW","HK"].includes(m.countryOfOrigin)?"Manhua":"Manga",
     genres:[...m.genres,...m.tags.filter(t=>!t.isMediaSpoiler).slice(0,5).map(t=>t.name)],
     synopsis:(m.description||"").replace(/<[^>]+>/g," ").replace(/\(Source:.*?\)/gi,"").replace(/\s+/g," ").trim().slice(0,320)
@@ -74,6 +75,7 @@ function Card({s,onOpen,drag,readOnly}){
       {s.priority&&<span className="absolute top-2 right-2 rounded-full bg-amber-400 text-black text-xs font-bold px-2 py-0.5">★ Top pick</span>}
     </div>
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
+      {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{s.status==="done"&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div></div>
   </article>}
 
@@ -104,6 +106,7 @@ const L=({t,children})=><label className="block"><span className="text-sm font-s
       <div className="flex gap-2 flex-wrap">{STATUS.map(([k,l])=><button key={k} disabled={readOnly} onClick={()=>set("status",k)} className={"rounded-full px-4 py-1.5 text-sm font-bold "+(f.status===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l}</button>)}</div>
       <div className="flex items-center justify-between rounded-xl bg-plum/10 p-3"><div><span className="text-sm font-semibold opacity-70">Excitement</span><br/><Stars v={f.excitement} on={readOnly?null:v=>set("excitement",v)}/></div>
         {!readOnly&&<button onClick={()=>set("priority",!f.priority)} className={"rounded-full px-4 py-2 font-bold "+(f.priority?"bg-amber-400 text-black":"bg-white/60 dark:bg-white/10")}>{f.priority?"★ Top pick":"☆ Mark as top pick"}</button>}</div>
+      <L t="Series status (is it still being released?)"><select className="inp" value={f.pub_status||""} disabled={readOnly} onChange={e=>set("pub_status",e.target.value)}><option value="">Not set</option>{PUB.map(o=><option key={o}>{o}</option>)}</select></L>
       <L t="Synopsis"><textarea className="inp" rows={4} value={f.synopsis||""} disabled={readOnly} onChange={e=>set("synopsis",e.target.value)}/></L>
       <L t="Genres (comma separated)"><input className="inp" value={f.genres} disabled={readOnly} onChange={e=>set("genres",e.target.value)}/></L>
       <L t="Tropes and tags (e.g. Historical Romance, 90s Romance)"><input className="inp" value={f.tags} disabled={readOnly} onChange={e=>set("tags",e.target.value)}/></L>
