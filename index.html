@@ -139,7 +139,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
   const pick=r=>{setF(p=>({...p,...r,genres:r.genres.join(", ")}));setRes([]);setQ("")};
   const save=()=>{if(!f.title.trim())return alert("Add a title first.");
     onSave({...f,genres:arr(f.genres),tags:arr(f.tags),media:arr(f.media),rating:f.rating===""||f.rating==null?null:Number(f.rating)})};
-  const media=arr(f.media),fin=fin||f.status==="hiatus";
+  const media=arr(f.media),fin=(f.status==="done"||f.status==="hiatus");
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
     <div className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4" onClick={e=>e.stopPropagation()}>
       <div className="flex items-center justify-between"><h2 className="text-2xl font-extrabold">{readOnly?f.title:isNew?"Add new series":"Edit series"}</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
