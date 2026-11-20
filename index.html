@@ -232,9 +232,9 @@ function Tracker({user,dark,setDark,th}){
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         
         
-        <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button>
-        <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
-        <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button></div></header>
+                <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
+        <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button>
+        <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button></div></header>
     <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
     <Filters f={f} setF={setF} items={items}/>
     {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
