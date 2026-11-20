@@ -1,4 +1,5 @@
+// Your Supabase keys live here. Keep the quotation marks.
 window.APP_CONFIG = {
-  url: "https://gpoapxxkxbcaytzeguea.supabase.co",
-  key: "sb_publishable_q3gR7vhq-k1LieLg-EEjsA_zwVuracK"
+  url: "PASTE_YOUR_PROJECT_URL",
+  key: "PASTE_YOUR_ANON_PUBLIC_KEY"
 };
