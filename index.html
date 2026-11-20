@@ -77,7 +77,8 @@ function Card({s,onOpen,drag,readOnly}){
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{s.status==="done"&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div></div>
   </article>}
 
-function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
+const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
+  function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
   const isNew=!item.id;
   const [f,setF]=useState({...blank,...item,genres:(item.genres||[]).join(", "),tags:(item.tags||[]).join(", "),media:(item.media||[]).join("\n")});
   const [q,setQ]=useState(""),[res,setRes]=useState([]),[busy,setBusy]=useState(false);
@@ -87,7 +88,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
   const pick=r=>{setF(p=>({...p,...r,genres:r.genres.join(", ")}));setRes([]);setQ("")};
   const save=()=>{if(!f.title.trim())return alert("Add a title first.");
     onSave({...f,genres:arr(f.genres),tags:arr(f.tags),media:arr(f.media),rating:f.rating===""||f.rating==null?null:Number(f.rating)})};
-  const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
+ 
   const media=arr(f.media);
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
     <div className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4" onClick={e=>e.stopPropagation()}>
