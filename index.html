@@ -36,10 +36,10 @@ const SUPABASE_ANON_KEY = (window.APP_CONFIG||{}).key || "PASTE_YOUR_ANON_PUBLIC
 const {useState,useEffect,useMemo,useRef}=React;
 const configured=!SUPABASE_URL.startsWith("PASTE");
 const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
-const STATUS=[["want","Want to Read"],["reading","Reading"],["done","Completed"]];
+const STATUS=[["reading","Reading"],["want","Want to Read"],["hiatus","Read on Hiatus"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
 const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
-const TABS=[["active","Reading + Want to Read"],["want","Want to Read"],["reading","Reading"],["done","Completed"]];
+const TABS=STATUS;
 const PRESETS={Lavender:["#7B5CF0","#F3F1F7","#14121F"],Sakura:["#EC4899","#FDF1F5","#1F121A"],Matcha:["#22A06B","#EEF6F0","#101A15"],Ocean:["#0E87DC","#EEF5FA","#0F1823"],Peach:["#F4723C","#FFF3EA","#1E1511"]};
 const rgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)).join(" ");
 function applyTheme(t,dark){const p=PRESETS[t.preset]||PRESETS.Lavender,a=t.accent||p[0],s=document.documentElement.style;
@@ -94,7 +94,7 @@ function ProfilePanel({user,prof,items,onSave,onClose}){
       <input ref={fr} type="file" accept="image/*" hidden onChange={pick}/></div>
     <label className="block"><span className="text-sm font-semibold opacity-70">Display name</span><input className="inp" value={name} maxLength={40} onChange={e=>setName(e.target.value)} placeholder="What should friends call you?"/></label>
     <label className="block"><span className="text-sm font-semibold opacity-70">About me</span><textarea className="inp" rows={3} maxLength={200} value={bio} onChange={e=>setBio(e.target.value)} placeholder="Favorite genres, tropes, anything"/></label>
-    <div className="grid grid-cols-3 gap-2 text-center">{[["Reading",n("reading")],["Want to read",n("want")],["Completed",n("done")]].map(([l,v])=><div key={l} className="rounded-2xl bg-plum/10 p-3"><p className="text-2xl font-extrabold">{v}</p><p className="text-xs opacity-70">{l}</p></div>)}</div>
+    <div className="grid grid-cols-4 gap-2 text-center">{[["Reading",n("reading")],["Want to read",n("want")],["On hiatus",n("hiatus")],["Completed",n("done")]].map(([l,v])=><div key={l} className="rounded-2xl bg-plum/10 p-3"><p className="text-2xl font-extrabold">{v}</p><p className="text-xs opacity-70">{l}</p></div>)}</div>
     <p className="text-sm opacity-60">Signed in as {user.email}</p>
     <button onClick={()=>onSave({display_name:name.trim()||null,bio:bio.trim()||null,avatar_url:av||null})} className="w-full rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">Save profile</button></div></div>}
 
@@ -119,12 +119,13 @@ function Card({s,onOpen,drag,readOnly}){
   return <article draggable={!readOnly&&!!drag} {...(drag||{})} onClick={()=>onOpen(s)} className={"group cursor-pointer rounded-2xl overflow-hidden bg-white dark:bg-white/5 transition hover:-translate-y-1 "+(s.priority?"ring-2 ring-amber-400 shadow-[0_8px_30px_rgba(242,179,61,.3)]":"shadow-sm hover:shadow-lg")}>
     <div className="relative aspect-[2/3] bg-plum/10">
       {s.cover_url?<img src={s.cover_url} alt="" loading="lazy" className="w-full h-full object-cover"/>:<div className="h-full grid place-items-center p-4 text-center font-bold opacity-60">{s.title}</div>}
-      <span className="absolute top-2 left-2 text-xs font-bold rounded-full px-2 py-0.5 bg-black/60 text-white">{s.format}{s.status==="reading"?" · Reading":""}</span>
+      <span className="absolute top-2 left-2 text-xs font-bold rounded-full px-2 py-0.5 bg-black/60 text-white">{s.format}</span>
       {s.priority&&<span className="absolute top-2 right-2 rounded-full bg-amber-400 text-black text-xs font-bold px-2 py-0.5">★ Top pick</span>}
     </div>
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
       {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
-      <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{s.status==="done"&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div></div>
+      <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{(s.status==="done"||s.status==="hiatus")&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
+      {s.notes&&<p className="mt-2 text-xs italic opacity-70 line-clamp-3 break-words">“{s.notes}”</p>}</div>
   </article>}
 
 const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
@@ -138,7 +139,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
   const pick=r=>{setF(p=>({...p,...r,genres:r.genres.join(", ")}));setRes([]);setQ("")};
   const save=()=>{if(!f.title.trim())return alert("Add a title first.");
     onSave({...f,genres:arr(f.genres),tags:arr(f.tags),media:arr(f.media),rating:f.rating===""||f.rating==null?null:Number(f.rating)})};
-  const media=arr(f.media);
+  const media=arr(f.media),fin=fin||f.status==="hiatus";
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
     <div className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4" onClick={e=>e.stopPropagation()}>
       <div className="flex items-center justify-between"><h2 className="text-2xl font-extrabold">{readOnly?f.title:isNew?"Add new series":"Edit series"}</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
@@ -162,10 +163,10 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
       {!readOnly&&<L t="Moodboard: image or TikTok links, one per line"><textarea className="inp" rows={3} value={f.media} onChange={e=>set("media",e.target.value)}/></L>}
       {media.length>0&&<div className="grid grid-cols-3 gap-2">{media.map(u=>isImg(u)?<a key={u} href={u} target="_blank"><img src={u} className="rounded-lg aspect-square object-cover w-full"/></a>:<a key={u} href={u} target="_blank" className="rounded-lg aspect-square grid place-items-center bg-plum/10 text-sm font-bold p-2 text-center">▶ Open video</a>)}</div>}
       {!readOnly&&<L t="Personal notes / footnotes"><textarea className="inp" rows={3} value={f.notes||""} onChange={e=>set("notes",e.target.value)}/></L>}
-      <div className={"rounded-2xl p-4 space-y-3 transition "+(f.status==="done"?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
-        <p className="font-bold">{f.status==="done"?"Your verdict":"Unlocks when you mark it Completed"}</p>
-        <L t="Final rating (0–10)"><input type="number" min="0" max="10" step="0.5" className="inp" disabled={readOnly||f.status!=="done"} value={f.rating??""} onChange={e=>set("rating",e.target.value)}/></L>
-        <L t="Review"><textarea className="inp" rows={4} disabled={readOnly||f.status!=="done"} value={f.review||""} onChange={e=>set("review",e.target.value)}/></L></div>
+      <div className={"rounded-2xl p-4 space-y-3 transition "+(fin?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
+        <p className="font-bold">{fin?"Your verdict":"Unlocks when you mark it Completed or Read on Hiatus"}</p>
+        <L t="Final rating (0–10)"><input type="number" min="0" max="10" step="0.5" className="inp" disabled={readOnly||!fin} value={f.rating??""} onChange={e=>set("rating",e.target.value)}/></L>
+        <L t="Review"><textarea className="inp" rows={4} disabled={readOnly||!fin} value={f.review||""} onChange={e=>set("review",e.target.value)}/></L></div>
       {!readOnly&&<div className="flex gap-2 sticky bottom-0 py-3 bg-paper dark:bg-night">
         <button onClick={save} className="flex-1 rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">{isNew?"Add to my list":"Save changes"}</button>
         {!isNew&&<button onClick={()=>onShare(item)} className="rounded-xl bg-plum/15 px-4 font-bold">Share rec</button>}
@@ -199,7 +200,7 @@ function malImport(xml,uid){
 }
 
 function Tracker({user,dark,setDark,th}){
-  const [items,setItems]=useState([]),[tab,setTab]=useState("active"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false);
+  const [items,setItems]=useState([]),[tab,setTab]=useState("reading"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false);
   const dragIdx=useRef(null),fileRef=useRef();
   const load=async()=>{const {data}=await sb.from("series").select("*").order("position");setItems(data||[])};
   useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
@@ -229,14 +230,14 @@ function Tracker({user,dark,setDark,th}){
       <div className="flex gap-2 flex-wrap">
         <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
-        <button onClick={()=>fileRef.current.click()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Import MAL</button>
-        <input ref={fileRef} type="file" accept=".xml,.gz" hidden onChange={onFile}/>
+        
+        
         <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button>
         <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button></div></header>
     <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
     <Filters f={f} setF={setF} items={items}/>
-    {(tab==="want"||tab==="active")&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
+    {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
     {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {visible.map((s,i)=><Card key={s.id} s={s} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
