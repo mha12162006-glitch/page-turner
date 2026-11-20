@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Manhwa Tracker</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#7B5CF0">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Manhwa Tracker">
 <script src="config.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com/3.4.17"></script>
@@ -25,12 +30,12 @@
 <body class="font-sans antialiased"><div id="root"></div>
 <script type="text/babel" data-presets="react">
 /* Your Supabase keys now live in config.js */
-const SUPABASE_URL = (window.APP_CONFIG||{}).url || "https://gpoapxxkxbcaytzeguea.supabase.co";
-const SUPABASE_ANON_KEY = (window.APP_CONFIG||{}).key || "sb_publishable_q3gR7vhq-k1LieLg-EEjsA_zwVuracK";
+const SUPABASE_URL = (window.APP_CONFIG||{}).url || "PASTE_YOUR_PROJECT_URL";
+const SUPABASE_ANON_KEY = (window.APP_CONFIG||{}).key || "PASTE_YOUR_ANON_PUBLIC_KEY";
 /* ========================================================== */
 const {useState,useEffect,useMemo,useRef}=React;
 const configured=!SUPABASE_URL.startsWith("PASTE");
-const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
+const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
 const STATUS=[["want","Want to Read"],["reading","Reading"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
 const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
@@ -74,6 +79,24 @@ function ThemePanel({th,dark,setDark,onClose}){const {t,setT}=th;const acc=t.acc
     <Row label="Soft color glow background"><input type="checkbox" checked={!!t.grad} onChange={e=>setT({...t,grad:e.target.checked})} className="h-5 w-5 accent-plum"/></Row>
     <Row label="Dark mode"><input type="checkbox" checked={dark} onChange={()=>setDark(!dark)} className="h-5 w-5 accent-plum"/></Row>
     <button onClick={()=>setT({preset:"Lavender",grad:true})} className="text-sm underline opacity-70">Reset to default look</button></div></div>}
+
+function Avatar({url,name,size=40}){return url?<img src={url} alt="" style={{width:size,height:size}} className="rounded-full object-cover"/>:<span style={{width:size,height:size,fontSize:size/2.2}} className="rounded-full bg-plum text-white font-extrabold grid place-items-center">{(name||"?").slice(0,1).toUpperCase()}</span>}
+function resizeImg(file){return new Promise((ok,no)=>{const img=new Image();img.onload=()=>{const c=document.createElement("canvas"),n=256,m=Math.min(img.width,img.height);c.width=c.height=n;c.getContext("2d").drawImage(img,(img.width-m)/2,(img.height-m)/2,m,m,0,0,n,n);ok(c.toDataURL("image/jpeg",.85))};img.onerror=no;img.src=URL.createObjectURL(file)})}
+
+function ProfilePanel({user,prof,items,onSave,onClose}){
+  const [name,setName]=useState(prof.display_name||""),[bio,setBio]=useState(prof.bio||""),[av,setAv]=useState(prof.avatar_url||""),fr=useRef();
+  const pick=async e=>{const f=e.target.files[0];if(f)try{setAv(await resizeImg(f))}catch(x){alert("That image could not be read. Try a JPG or PNG.")}};
+  const n=k=>items.filter(i=>i.status===k).length;
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}><div className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+    <div className="flex justify-between items-center"><h2 className="text-2xl font-extrabold">My profile</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
+    <div className="flex flex-col items-center gap-3"><Avatar url={av} name={name||user.email} size={112}/>
+      <div className="flex gap-2"><button onClick={()=>fr.current.click()} className="rounded-full bg-plum/15 font-bold px-4 py-1.5 text-sm">Upload photo</button>{av&&<button onClick={()=>setAv("")} className="rounded-full px-4 py-1.5 text-sm underline opacity-70">Remove</button>}</div>
+      <input ref={fr} type="file" accept="image/*" hidden onChange={pick}/></div>
+    <label className="block"><span className="text-sm font-semibold opacity-70">Display name</span><input className="inp" value={name} maxLength={40} onChange={e=>setName(e.target.value)} placeholder="What should friends call you?"/></label>
+    <label className="block"><span className="text-sm font-semibold opacity-70">About me</span><textarea className="inp" rows={3} maxLength={200} value={bio} onChange={e=>setBio(e.target.value)} placeholder="Favorite genres, tropes, anything"/></label>
+    <div className="grid grid-cols-3 gap-2 text-center">{[["Reading",n("reading")],["Want to read",n("want")],["Completed",n("done")]].map(([l,v])=><div key={l} className="rounded-2xl bg-plum/10 p-3"><p className="text-2xl font-extrabold">{v}</p><p className="text-xs opacity-70">{l}</p></div>)}</div>
+    <p className="text-sm opacity-60">Signed in as {user.email}</p>
+    <button onClick={()=>onSave({display_name:name.trim()||null,bio:bio.trim()||null,avatar_url:av||null})} className="w-full rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">Save profile</button></div></div>}
 
 function Setup(){return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-md rounded-3xl bg-white/70 dark:bg-white/5 p-8 pop">
   <h1 className="text-3xl font-extrabold">Almost there</h1><p className="mt-3 opacity-80">Add a file named <code>config.js</code> next to index.html containing your Supabase Project URL and anon key, then reload.</p></div></div>}
@@ -160,22 +183,32 @@ function Filters({f,setF,items}){
 const emptyF={q:"",format:"",tag:"",source:"",top:false};
 const applyF=(items,f)=>items.filter(i=>(!f.q||i.title.toLowerCase().includes(f.q.toLowerCase()))&&(!f.format||i.format===f.format)&&(!f.tag||(i.tags||[]).includes(f.tag))&&(!f.source||i.source===f.source)&&(!f.top||i.priority));
 
+async function readMalFile(file){
+  const buf=await file.arrayBuffer(),b=new Uint8Array(buf);
+  if(b[0]===0x1f&&b[1]===0x8b)return new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+  return new TextDecoder().decode(buf);
+}
 function malImport(xml,uid){
-  const doc=new DOMParser().parseFromString(xml,"text/xml");const map={reading:"reading",completed:"done","plan to read":"want","1":"reading","2":"done","6":"want"};
-  return [...doc.querySelectorAll("manga")].map((n,i)=>{const g=t=>n.querySelector(t)?.textContent?.trim()||"";
-    const st=map[g("my_status").toLowerCase()];if(!st&&g("my_status"))return null;const sc=Number(g("my_score"));
-    return {user_id:uid,title:g("series_title"),format:"Manga",status:st||"want",rating:st==="done"&&sc>0?sc:null,notes:g("my_comments")||null,position:i}}).filter(x=>x&&x.title);
+  const doc=new DOMParser().parseFromString(xml,"text/xml");
+  const map={reading:"reading",completed:"done","plan to read":"want","on-hold":"want",dropped:"want","1":"reading","2":"done","3":"want","4":"want","6":"want"};
+  const rows=[...doc.getElementsByTagName("manga")].map((n,i)=>{
+    const g=t=>n.getElementsByTagName(t)[0]?.textContent?.trim()||"";const raw=g("my_status").toLowerCase(),st=map[raw]||"want",sc=Number(g("my_score"));
+    const held=["on-hold","3"].includes(raw),drop=["dropped","4"].includes(raw);
+    return {user_id:uid,title:g("manga_title")||g("series_title"),format:"Manga",status:st,rating:st==="done"&&sc>0?sc:null,notes:g("my_comments")||null,tags:held?["MAL: On-Hold"]:drop?["MAL: Dropped"]:[],position:i}}).filter(r=>r.title);
+  return {rows,anime:doc.getElementsByTagName("anime").length};
 }
 
 function Tracker({user,dark,setDark,th}){
-  const [items,setItems]=useState([]),[tab,setTab]=useState("active"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false);
+  const [items,setItems]=useState([]),[tab,setTab]=useState("active"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false);
   const dragIdx=useRef(null),fileRef=useRef();
   const load=async()=>{const {data}=await sb.from("series").select("*").order("position");setItems(data||[])};
   useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
+  useEffect(()=>{sb.from("profiles").select("*").eq("user_id",user.id).maybeSingle().then(({data})=>setProf(data||{}))},[]);
   const say=m=>{setToast(m);setTimeout(()=>setToast(""),2500)};
   const save=async s=>{const {id,created_at,user_id,...rest}=s;
     const r=id?await sb.from("series").update(rest).eq("id",id):await sb.from("series").insert({...rest,position:Math.max(-1,...items.map(i=>i.position))+1});
     if(r.error)return alert(r.error.message);setOpen(null);load();say(id?"Saved":"Added")};
+  const saveProf=async p=>{const {error}=await sb.from("profiles").upsert({user_id:user.id,...p});if(error)return alert(error.message);setProf(x=>({...x,...p}));setPP(false);say("Profile saved")};
   const del=async s=>{await sb.from("series").delete().eq("id",s.id);setOpen(null);load()};
   const link=async id=>{await sb.from("profiles").upsert({user_id:user.id,is_public:true});
     const url=location.href.split("#")[0]+"#/share/"+user.id+(id?"/"+id:"");await navigator.clipboard.writeText(url).catch(()=>prompt("Copy this link",url));say("Link copied")};
@@ -185,17 +218,20 @@ function Tracker({user,dark,setDark,th}){
     const list=[...visible];const [m]=list.splice(from,1);list.splice(to,0,m);
     const pos=list.map((x,i)=>({id:x.id,position:i}));setItems(p=>p.map(x=>({...x,position:pos.find(y=>y.id===x.id)?.position??x.position})).sort((a,b)=>a.position-b.position));
     await Promise.all(pos.map(p=>sb.from("series").update({position:p.position}).eq("id",p.id)));load()};
-  const onFile=async e=>{const file=e.target.files[0];if(!file)return;const rows=malImport(await file.text(),user.id);
-    if(!rows.length)return alert("No manga entries found in that file.");
+  const onFile=async e=>{const file=e.target.files[0];e.target.value="";if(!file)return;
+    let xml;try{xml=await readMalFile(file)}catch(err){return alert("Could not read that file. Try unzipping it first and choosing the .xml file inside.")}
+    const {rows,anime}=malImport(xml,user.id);
+    if(!rows.length)return alert(anime?"That looks like your anime list. Please choose your manga list file instead (it has manga in its name).":"No manga entries found. Make sure you chose the manga list export from MyAnimeList.");
     const {error}=await sb.from("series").insert(rows.map((r,i)=>({...r,position:items.length+i})));
-    error?alert(error.message):(say("Imported "+rows.length+" titles"),load());e.target.value=""};
+    error?alert(error.message):(say("Imported "+rows.length+" titles"),load())};
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
     <header className="flex flex-wrap items-center gap-3 justify-between"><div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div>
       <div className="flex gap-2 flex-wrap">
         <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         <button onClick={()=>fileRef.current.click()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Import MAL</button>
-        <input ref={fileRef} type="file" accept=".xml" hidden onChange={onFile}/>
+        <input ref={fileRef} type="file" accept=".xml,.gz" hidden onChange={onFile}/>
+        <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button>
         <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button></div></header>
     <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
@@ -205,16 +241,17 @@ function Tracker({user,dark,setDark,th}){
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
       {visible.map((s,i)=><Card key={s.id} s={s} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
     {open&&<Drawer item={open} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
+    {pp&&<ProfilePanel user={user} prof={prof} items={items} onSave={saveProf} onClose={()=>setPP(false)}/>}
     {panel&&<ThemePanel th={th} dark={dark} setDark={setDark} onClose={()=>setPanel(false)}/>}
     {toast&&<div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-ink text-white px-5 py-2 pop">{toast}</div>}
   </div>}
 
 function Shared({uid,sid,dark,setDark}){
-  const [items,setItems]=useState(null),[open,setOpen]=useState(null);
-  useEffect(()=>{let q=sb.from("series").select("*").eq("user_id",uid).order("position");if(sid)q=q.eq("id",sid);q.then(({data})=>setItems(data||[]))},[]);
+  const [items,setItems]=useState(null),[open,setOpen]=useState(null),[who,setWho]=useState({});
+  useEffect(()=>{sb.from("profiles").select("display_name,avatar_url,bio").eq("user_id",uid).maybeSingle().then(({data})=>setWho(data||{}));let q=sb.from("series").select("*").eq("user_id",uid).order("position");if(sid)q=q.eq("id",sid);q.then(({data})=>setItems(data||[]))},[]);
   const clean=s=>({...s,notes:null,source:null,media:[]});
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-    <header className="flex justify-between items-center"><h1 className="text-3xl font-extrabold">{sid?"A recommendation for you":"A reading list to browse"}</h1><button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></header>
+    <header className="flex justify-between items-center"><div className="flex items-center gap-3"><Avatar url={who.avatar_url} name={who.display_name} size={56}/><div><h1 className="text-3xl font-extrabold">{sid?"A recommendation from "+(who.display_name||"a friend"):who.display_name?who.display_name+"’s reading list":"A reading list to browse"}</h1>{who.bio&&<p className="opacity-70">{who.bio}</p>}</div></div><button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></header>
     {items===null?<p>Loading…</p>:items.length===0?<p className="opacity-70">This list is private or empty.</p>:
     STATUS.map(([k,l])=>{const g=items.filter(i=>i.status===k);return g.length>0&&<section key={k}><h2 className="text-xl font-bold mb-3">{l}</h2>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{g.map(s=><Card key={s.id} s={s} readOnly onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
@@ -235,6 +272,7 @@ function App(){
   if(session===undefined)return null;
   return session?<Tracker user={session.user} dark={dark} setDark={setDark} th={{t,setT}}/>:<Auth/>;
 }
+if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
