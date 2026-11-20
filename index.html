@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manhwa Tracker</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
+<script src="config.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={darkMode:'class',theme:{extend:{fontFamily:{sans:['"Bricolage Grotesque"','system-ui','sans-serif']},colors:{ink:'#1F1B3A',paper:'var(--bg)',night:'var(--bg)',plum:'rgb(var(--accent) / <alpha-value>)'}}}}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--accent:123 92 240;--bg:#F3F1F7}.dark{--bg:#14121F}body{background-color:var(--bg);background-attachment:fixed;color:#1F1B3A;transition:background-color .3s}.dark body{color:#EDEAF7}
+.drawer{animation:slide .28s cubic-bezier(.2,.8,.2,1)}@keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.pop{animation:pop .2s ease-out}@keyframes pop{from{transform:scale(.97);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){.drawer,.pop{animation:none}}
+.inp{width:100%;border-radius:.75rem;padding:.55rem .8rem;background:rgb(var(--accent)/.07);border:1px solid rgb(var(--accent)/.2);outline:none}
+.inp:focus{border-color:rgb(var(--accent));box-shadow:0 0 0 3px rgb(var(--accent)/.25)}
+</style>
+</head>
+<body class="font-sans antialiased"><div id="root"></div>
+<script type="text/babel" data-presets="react">
+/* Your Supabase keys now live in config.js */
+const SUPABASE_URL = (window.APP_CONFIG||{}).url || "PASTE_YOUR_PROJECT_URL";
+const SUPABASE_ANON_KEY = (window.APP_CONFIG||{}).key || "PASTE_YOUR_ANON_PUBLIC_KEY";
+/* ========================================================== */
+const {useState,useEffect,useMemo,useRef}=React;
+const configured=!SUPABASE_URL.startsWith("PASTE");
+const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
+const STATUS=[["want","Want to Read"],["reading","Reading"],["done","Completed"]];
+const FORMATS=["Manhwa","Manga","Manhua"];
+const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
+const TABS=[["active","Reading + Want to Read"],["want","Want to Read"],["reading","Reading"],["done","Completed"]];
+const PRESETS={Lavender:["#7B5CF0","#F3F1F7","#14121F"],Sakura:["#EC4899","#FDF1F5","#1F121A"],Matcha:["#22A06B","#EEF6F0","#101A15"],Ocean:["#0E87DC","#EEF5FA","#0F1823"],Peach:["#F4723C","#FFF3EA","#1E1511"]};
+const rgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)).join(" ");
+function applyTheme(t,dark){const p=PRESETS[t.preset]||PRESETS.Lavender,a=t.accent||p[0],s=document.documentElement.style;
+  s.setProperty("--accent",rgb(a));s.setProperty("--bg",dark?p[2]:p[1]);
+  document.body.style.backgroundImage=t.grad?`radial-gradient(circle at 8% 0%,${a}38,transparent 42%),radial-gradient(circle at 100% 15%,${a}26,transparent 38%)`:"none"}
+const arr=s=>(s||"").split(/[,\n]/).map(x=>x.trim()).filter(Boolean);
+const blank={title:"",cover_url:"",format:"Manhwa",genres:[],synopsis:"",status:"want",excitement:0,priority:false,source:"",media:[],tags:[],warnings:"",notes:"",rating:null,review:"",pub_status:""};
+const isImg=u=>/\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(u)||/pinimg|googleusercontent|gstatic/.test(u);
+
+async function searchAniList(q){
+  const query=`query($s:String){Page(perPage:8){media(search:$s,type:MANGA,sort:SEARCH_MATCH){id title{romaji english} coverImage{large} countryOfOrigin genres tags{name isMediaSpoiler} description(asHtml:false) status}}}`;
+  const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({query,variables:{s:q}})});
+  return (await r.json()).data.Page.media.map(m=>({
+    anilist_id:m.id,pub_status:{FINISHED:"Completed",RELEASING:"Ongoing",NOT_YET_RELEASED:"Not yet released",CANCELLED:"Discontinued",HIATUS:"On hiatus"}[m.status]||"",title:m.title.english||m.title.romaji,cover_url:m.coverImage.large,
+    format:m.countryOfOrigin==="KR"?"Manhwa":["CN","TW","HK"].includes(m.countryOfOrigin)?"Manhua":"Manga",
+    genres:[...m.genres,...m.tags.filter(t=>!t.isMediaSpoiler).slice(0,5).map(t=>t.name)],
+    synopsis:(m.description||"").replace(/<[^>]+>/g," ").replace(/\(Source:.*?\)/gi,"").replace(/\s+/g," ").trim().slice(0,320)
+  }));
+}
+
+function Stars({v,on,size="text-xl"}){return <span className={size}>{[1,2,3,4,5].map(n=>
+  <button key={n} type="button" disabled={!on} onClick={()=>on(v===n?0:n)} className={(n<=v?"text-amber-400":"text-stone-400/50")+" transition hover:scale-110"} aria-label={n+" hype"}>♥</button>)}</span>}
+
+function Logo({size=44}){return <svg width={size} height={size} viewBox="0 0 48 48" aria-label="Manhwa Tracker logo">
+  <rect width="48" height="48" rx="14" className="fill-plum"/>
+  <path d="M9 19c5-2.5 10-2 15 1.5v17c-5-3-10-3.5-15-1.5z" fill="#fff"/><path d="M39 19c-5-2.5-10-2-15 1.5v17c5-3 10-3.5 15-1.5z" fill="#fff" opacity=".88"/>
+  <path d="M13 24c3-1 6-.5 8 1M13 29c3-1 6-.5 8 1M27 25c2-1.500 5-2 8-1M27 30c2-1.500 5-2 8-1" stroke="currentColor" className="text-plum" strokeWidth="1.600" strokeLinecap="round" fill="none" opacity=".45"/>
+  <path d="M24 17c-1.500-3-6-2.200-6 1.200 0 2.200 2.800 3.800 6 6.300 3.200-2.500 6-4.100 6-6.300 0-3.400-4.500-4.200-6-1.200z" fill="#FFB3D1" stroke="#fff" strokeWidth="1.500"/>
+  <circle cx="38" cy="10" r="1.800" fill="#fff"/><circle cx="10" cy="11" r="1.200" fill="#fff" opacity=".8"/></svg>}
+
+function ThemePanel({th,dark,setDark,onClose}){const {t,setT}=th;const acc=t.accent||PRESETS[t.preset][0];
+  const Row=({label,children})=><label className="flex items-center justify-between font-semibold">{label}{children}</label>;
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}><div className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+    <div className="flex justify-between items-center"><h2 className="text-2xl font-extrabold">Make it yours</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
+    <div><p className="font-semibold mb-2">Theme</p><div className="grid grid-cols-5 gap-2">{Object.entries(PRESETS).map(([n,p])=><button key={n} onClick={()=>setT({...t,preset:n,accent:null})} className={"rounded-2xl p-1 text-xs font-bold "+(t.preset===n&&!t.accent?"ring-2 ring-plum":"")}><span className="block h-10 rounded-xl mb-1" style={{background:`linear-gradient(135deg,${p[0]},${p[1]})`}}/>{n}</button>)}</div></div>
+    <Row label="Custom accent color"><input type="color" value={acc} onChange={e=>setT({...t,accent:e.target.value})} className="h-10 w-16 rounded-lg bg-transparent cursor-pointer"/></Row>
+    <Row label="Soft color glow background"><input type="checkbox" checked={!!t.grad} onChange={e=>setT({...t,grad:e.target.checked})} className="h-5 w-5 accent-plum"/></Row>
+    <Row label="Dark mode"><input type="checkbox" checked={dark} onChange={()=>setDark(!dark)} className="h-5 w-5 accent-plum"/></Row>
+    <button onClick={()=>setT({preset:"Lavender",grad:true})} className="text-sm underline opacity-70">Reset to default look</button></div></div>}
+
+function Setup(){return <div className="min-h-screen grid place-items-center p-6"><div className="max-w-md rounded-3xl bg-white/70 dark:bg-white/5 p-8 pop">
+  <h1 className="text-3xl font-extrabold">Almost there</h1><p className="mt-3 opacity-80">Add a file named <code>config.js</code> next to index.html containing your Supabase Project URL and anon key, then reload.</p></div></div>}
+
+function Auth(){
+  const [email,setE]=useState(""),[pw,setP]=useState(""),[mode,setM]=useState("in"),[msg,setMsg]=useState("");
+  const go=async e=>{e.preventDefault();setMsg("");
+    const {error,data}=mode==="in"?await sb.auth.signInWithPassword({email,password:pw}):await sb.auth.signUp({email,password:pw});
+    if(error)setMsg(error.message);else if(mode==="up"&&!data.session)setMsg("Check your email to confirm your account, then sign in.")};
+  return <div className="min-h-screen grid place-items-center p-6"><form onSubmit={go} className="w-full max-w-sm rounded-3xl bg-white/70 dark:bg-white/5 p-8 space-y-4 pop">
+    <div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div><p className="opacity-70">Your queue of manhwa, manga and manhua, saved to your account.</p>
+    <input className="inp" type="email" placeholder="Email" value={email} onChange={e=>setE(e.target.value)} required/>
+    <input className="inp" type="password" placeholder="Password (6+ characters)" value={pw} onChange={e=>setP(e.target.value)} minLength={6} required/>
+    {msg&&<p className="text-sm text-rose-500">{msg}</p>}
+    <button className="w-full rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">{mode==="in"?"Sign in":"Create account"}</button>
+    <button type="button" className="text-sm underline opacity-70" onClick={()=>setM(mode==="in"?"up":"in")}>{mode==="in"?"New here? Create an account":"Have an account? Sign in"}</button>
+  </form></div>}
+
+function Card({s,onOpen,drag,readOnly}){
+  return <article draggable={!readOnly&&!!drag} {...(drag||{})} onClick={()=>onOpen(s)} className={"group cursor-pointer rounded-2xl overflow-hidden bg-white dark:bg-white/5 transition hover:-translate-y-1 "+(s.priority?"ring-2 ring-amber-400 shadow-[0_8px_30px_rgba(242,179,61,.3)]":"shadow-sm hover:shadow-lg")}>
+    <div className="relative aspect-[2/3] bg-plum/10">
+      {s.cover_url?<img src={s.cover_url} alt="" loading="lazy" className="w-full h-full object-cover"/>:<div className="h-full grid place-items-center p-4 text-center font-bold opacity-60">{s.title}</div>}
+      <span className="absolute top-2 left-2 text-xs font-bold rounded-full px-2 py-0.5 bg-black/60 text-white">{s.format}{s.status==="reading"?" · Reading":""}</span>
+      {s.priority&&<span className="absolute top-2 right-2 rounded-full bg-amber-400 text-black text-xs font-bold px-2 py-0.5">★ Top pick</span>}
+    </div>
+    <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
+      {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
+      <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{s.status==="done"&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div></div>
+  </article>}
+
+const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
+function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
+  const isNew=!item.id;
+  const [f,setF]=useState({...blank,...item,genres:(item.genres||[]).join(", "),tags:(item.tags||[]).join(", "),media:(item.media||[]).join("\n")});
+  const [q,setQ]=useState(""),[res,setRes]=useState([]),[busy,setBusy]=useState(false);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  useEffect(()=>{if(!isNew||q.length<3)return setRes([]);setBusy(true);
+    const t=setTimeout(()=>searchAniList(q).then(setRes).catch(()=>setRes([])).finally(()=>setBusy(false)),400);return()=>clearTimeout(t)},[q]);
+  const pick=r=>{setF(p=>({...p,...r,genres:r.genres.join(", ")}));setRes([]);setQ("")};
+  const save=()=>{if(!f.title.trim())return alert("Add a title first.");
+    onSave({...f,genres:arr(f.genres),tags:arr(f.tags),media:arr(f.media),rating:f.rating===""||f.rating==null?null:Number(f.rating)})};
+  const media=arr(f.media);
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+    <div className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4" onClick={e=>e.stopPropagation()}>
+      <div className="flex items-center justify-between"><h2 className="text-2xl font-extrabold">{readOnly?f.title:isNew?"Add new series":"Edit series"}</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
+      {isNew&&<div className="relative"><input className="inp" placeholder="Search AniList to auto-fill (e.g. Solo Leveling)" value={q} onChange={e=>setQ(e.target.value)}/>
+        {(busy||res.length>0)&&<div className="absolute z-10 mt-1 w-full max-h-80 overflow-y-auto rounded-xl bg-white dark:bg-[#221f33] shadow-xl">
+          {busy&&<p className="p-3 text-sm opacity-60">Searching…</p>}
+          {res.map(r=><button key={r.anilist_id} onClick={()=>pick(r)} className="flex gap-3 w-full text-left p-2 hover:bg-plum/10"><img src={r.cover_url} className="w-10 h-14 object-cover rounded"/><span><b>{r.title}</b><br/><span className="text-xs opacity-60">{r.format} · {r.genres.slice(0,3).join(", ")}</span></span></button>)}</div>}</div>}
+      <div className="flex gap-4">{f.cover_url&&<img src={f.cover_url} className="w-28 rounded-xl object-cover aspect-[2/3]"/>}
+        <div className="flex-1 space-y-3"><L t="Title"><input className="inp" value={f.title} disabled={readOnly} onChange={e=>set("title",e.target.value)}/></L>
+          <L t="Cover image URL"><input className="inp" value={f.cover_url||""} disabled={readOnly} onChange={e=>set("cover_url",e.target.value)}/></L></div></div>
+      <div className="flex gap-2 flex-wrap">{FORMATS.map(x=><button key={x} disabled={readOnly} onClick={()=>set("format",x)} className={"rounded-full px-4 py-1.5 text-sm font-bold "+(f.format===x?"bg-plum text-white":"bg-plum/10")}>{x}</button>)}</div>
+      <div className="flex gap-2 flex-wrap">{STATUS.map(([k,l])=><button key={k} disabled={readOnly} onClick={()=>set("status",k)} className={"rounded-full px-4 py-1.5 text-sm font-bold "+(f.status===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l}</button>)}</div>
+      <div className="flex items-center justify-between rounded-xl bg-plum/10 p-3"><div><span className="text-sm font-semibold opacity-70">Excitement</span><br/><Stars v={f.excitement} on={readOnly?null:v=>set("excitement",v)}/></div>
+        {!readOnly&&<button onClick={()=>set("priority",!f.priority)} className={"rounded-full px-4 py-2 font-bold "+(f.priority?"bg-amber-400 text-black":"bg-white/60 dark:bg-white/10")}>{f.priority?"★ Top pick":"☆ Mark as top pick"}</button>}</div>
+      <L t="Series status (is it still being released?)"><select className="inp" value={f.pub_status||""} disabled={readOnly} onChange={e=>set("pub_status",e.target.value)}><option value="">Not set</option>{PUB.map(o=><option key={o}>{o}</option>)}</select></L>
+      <L t="Synopsis"><textarea className="inp" rows={4} value={f.synopsis||""} disabled={readOnly} onChange={e=>set("synopsis",e.target.value)}/></L>
+      <L t="Genres (comma separated)"><input className="inp" value={f.genres} disabled={readOnly} onChange={e=>set("genres",e.target.value)}/></L>
+      <L t="Tropes and tags (e.g. Historical Romance, 90s Romance)"><input className="inp" value={f.tags} disabled={readOnly} onChange={e=>set("tags",e.target.value)}/></L>
+      <L t="Content / trigger warnings"><input className="inp" value={f.warnings||""} disabled={readOnly} onChange={e=>set("warnings",e.target.value)}/></L>
+      {!readOnly&&<L t="Where did you find it? (TikTok, a friend, Reddit…)"><input className="inp" value={f.source||""} onChange={e=>set("source",e.target.value)}/></L>}
+      {!readOnly&&<L t="Moodboard: image or TikTok links, one per line"><textarea className="inp" rows={3} value={f.media} onChange={e=>set("media",e.target.value)}/></L>}
+      {media.length>0&&<div className="grid grid-cols-3 gap-2">{media.map(u=>isImg(u)?<a key={u} href={u} target="_blank"><img src={u} className="rounded-lg aspect-square object-cover w-full"/></a>:<a key={u} href={u} target="_blank" className="rounded-lg aspect-square grid place-items-center bg-plum/10 text-sm font-bold p-2 text-center">▶ Open video</a>)}</div>}
+      {!readOnly&&<L t="Personal notes / footnotes"><textarea className="inp" rows={3} value={f.notes||""} onChange={e=>set("notes",e.target.value)}/></L>}
+      <div className={"rounded-2xl p-4 space-y-3 transition "+(f.status==="done"?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
+        <p className="font-bold">{f.status==="done"?"Your verdict":"Unlocks when you mark it Completed"}</p>
+        <L t="Final rating (0–10)"><input type="number" min="0" max="10" step="0.5" className="inp" disabled={readOnly||f.status!=="done"} value={f.rating??""} onChange={e=>set("rating",e.target.value)}/></L>
+        <L t="Review"><textarea className="inp" rows={4} disabled={readOnly||f.status!=="done"} value={f.review||""} onChange={e=>set("review",e.target.value)}/></L></div>
+      {!readOnly&&<div className="flex gap-2 sticky bottom-0 py-3 bg-paper dark:bg-night">
+        <button onClick={save} className="flex-1 rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">{isNew?"Add to my list":"Save changes"}</button>
+        {!isNew&&<button onClick={()=>onShare(item)} className="rounded-xl bg-plum/15 px-4 font-bold">Share rec</button>}
+        {!isNew&&<button onClick={()=>confirm("Delete this series?")&&onDelete(item)} className="rounded-xl bg-rose-500/15 text-rose-500 px-4 font-bold">Delete</button>}</div>}
+    </div></div>}
+
+function Filters({f,setF,items}){
+  const uniq=k=>[...new Set(items.flatMap(i=>Array.isArray(i[k])?i[k]:[i[k]]).filter(Boolean))].sort();
+  const S=({k,label,opts})=><select className="inp !w-auto" value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}><option value="">{label}</option>{opts.map(o=><option key={o}>{o}</option>)}</select>;
+  return <div className="flex gap-2 flex-wrap items-center">
+    <input className="inp !w-48" placeholder="Search my list" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/>
+    <S k="format" label="Category" opts={FORMATS}/><S k="tag" label="Trope" opts={uniq("tags")}/><S k="source" label="Source" opts={uniq("source")}/>
+    <button onClick={()=>setF({...f,top:!f.top})} className={"rounded-full px-4 py-2 text-sm font-bold "+(f.top?"bg-amber-400 text-black":"bg-plum/10")}>★ Top picks</button></div>}
+
+const emptyF={q:"",format:"",tag:"",source:"",top:false};
+const applyF=(items,f)=>items.filter(i=>(!f.q||i.title.toLowerCase().includes(f.q.toLowerCase()))&&(!f.format||i.format===f.format)&&(!f.tag||(i.tags||[]).includes(f.tag))&&(!f.source||i.source===f.source)&&(!f.top||i.priority));
+
+function malImport(xml,uid){
+  const doc=new DOMParser().parseFromString(xml,"text/xml");const map={reading:"reading",completed:"done","plan to read":"want","1":"reading","2":"done","6":"want"};
+  return [...doc.querySelectorAll("manga")].map((n,i)=>{const g=t=>n.querySelector(t)?.textContent?.trim()||"";
+    const st=map[g("my_status").toLowerCase()];if(!st&&g("my_status"))return null;const sc=Number(g("my_score"));
+    return {user_id:uid,title:g("series_title"),format:"Manga",status:st||"want",rating:st==="done"&&sc>0?sc:null,notes:g("my_comments")||null,position:i}}).filter(x=>x&&x.title);
+}
+
+function Tracker({user,dark,setDark,th}){
+  const [items,setItems]=useState([]),[tab,setTab]=useState("active"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false);
+  const dragIdx=useRef(null),fileRef=useRef();
+  const load=async()=>{const {data}=await sb.from("series").select("*").order("position");setItems(data||[])};
+  useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
+  const say=m=>{setToast(m);setTimeout(()=>setToast(""),2500)};
+  const save=async s=>{const {id,created_at,user_id,...rest}=s;
+    const r=id?await sb.from("series").update(rest).eq("id",id):await sb.from("series").insert({...rest,position:Math.max(-1,...items.map(i=>i.position))+1});
+    if(r.error)return alert(r.error.message);setOpen(null);load();say(id?"Saved":"Added")};
+  const del=async s=>{await sb.from("series").delete().eq("id",s.id);setOpen(null);load()};
+  const link=async id=>{await sb.from("profiles").upsert({user_id:user.id,is_public:true});
+    const url=location.href.split("#")[0]+"#/share/"+user.id+(id?"/"+id:"");await navigator.clipboard.writeText(url).catch(()=>prompt("Copy this link",url));say("Link copied")};
+  const visible=useMemo(()=>applyF(items.filter(i=>tab==="active"?i.status!=="done":i.status===tab),f),[items,tab,f]);
+  const canDrag=f===emptyF||JSON.stringify(f)===JSON.stringify(emptyF);
+  const drop=async to=>{const from=dragIdx.current;if(from==null||from===to)return;
+    const list=[...visible];const [m]=list.splice(from,1);list.splice(to,0,m);
+    const pos=list.map((x,i)=>({id:x.id,position:i}));setItems(p=>p.map(x=>({...x,position:pos.find(y=>y.id===x.id)?.position??x.position})).sort((a,b)=>a.position-b.position));
+    await Promise.all(pos.map(p=>sb.from("series").update({position:p.position}).eq("id",p.id)));load()};
+  const onFile=async e=>{const file=e.target.files[0];if(!file)return;const rows=malImport(await file.text(),user.id);
+    if(!rows.length)return alert("No manga entries found in that file.");
+    const {error}=await sb.from("series").insert(rows.map((r,i)=>({...r,position:items.length+i})));
+    error?alert(error.message):(say("Imported "+rows.length+" titles"),load());e.target.value=""};
+  return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+    <header className="flex flex-wrap items-center gap-3 justify-between"><div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div>
+      <div className="flex gap-2 flex-wrap">
+        <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
+        <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
+        <button onClick={()=>fileRef.current.click()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Import MAL</button>
+        <input ref={fileRef} type="file" accept=".xml" hidden onChange={onFile}/>
+        <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
+        <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button></div></header>
+    <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
+    <Filters f={f} setF={setF} items={items}/>
+    {(tab==="want"||tab==="active")&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
+    {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      {visible.map((s,i)=><Card key={s.id} s={s} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
+    {open&&<Drawer item={open} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
+    {panel&&<ThemePanel th={th} dark={dark} setDark={setDark} onClose={()=>setPanel(false)}/>}
+    {toast&&<div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-ink text-white px-5 py-2 pop">{toast}</div>}
+  </div>}
+
+function Shared({uid,sid,dark,setDark}){
+  const [items,setItems]=useState(null),[open,setOpen]=useState(null);
+  useEffect(()=>{let q=sb.from("series").select("*").eq("user_id",uid).order("position");if(sid)q=q.eq("id",sid);q.then(({data})=>setItems(data||[]))},[]);
+  const clean=s=>({...s,notes:null,source:null,media:[]});
+  return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+    <header className="flex justify-between items-center"><h1 className="text-3xl font-extrabold">{sid?"A recommendation for you":"A reading list to browse"}</h1><button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></header>
+    {items===null?<p>Loading…</p>:items.length===0?<p className="opacity-70">This list is private or empty.</p>:
+    STATUS.map(([k,l])=>{const g=items.filter(i=>i.status===k);return g.length>0&&<section key={k}><h2 className="text-xl font-bold mb-3">{l}</h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{g.map(s=><Card key={s.id} s={s} readOnly onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
+    {open&&<Drawer item={open} readOnly onClose={()=>setOpen(null)}/>}
+    <p className="text-sm opacity-60"><a className="underline" href={location.href.split("#")[0]}>Make your own list</a></p></div>}
+
+function App(){
+  const [dark,setDark]=useState(()=>{try{return localStorage.getItem("pt-dark")?localStorage.getItem("pt-dark")==="1":matchMedia("(prefers-color-scheme: dark)").matches}catch(e){return false}});
+  useEffect(()=>{document.documentElement.classList.toggle("dark",dark);try{localStorage.setItem("pt-dark",dark?"1":"0")}catch(e){}},[dark]);
+  const [hash,setHash]=useState(location.hash),[session,setSession]=useState(undefined);
+  const [t,setT]=useState(()=>{try{return JSON.parse(localStorage.getItem("mt-theme"))||{preset:"Lavender",grad:true}}catch(e){return {preset:"Lavender",grad:true}}});
+  useEffect(()=>{applyTheme(t,dark);try{localStorage.setItem("mt-theme",JSON.stringify(t))}catch(e){}},[t,dark]);
+  useEffect(()=>{const h=()=>setHash(location.hash);addEventListener("hashchange",h);return()=>removeEventListener("hashchange",h)},[]);
+  useEffect(()=>{if(!sb)return;sb.auth.getSession().then(({data})=>setSession(data.session));const {data}=sb.auth.onAuthStateChange((_e,s)=>setSession(s));return()=>data.subscription.unsubscribe()},[]);
+  if(!configured)return <Setup/>;
+  const m=hash.match(/^#\/share\/([\w-]+)(?:\/([\w-]+))?/);
+  if(m)return <Shared uid={m[1]} sid={m[2]} dark={dark} setDark={setDark}/>;
+  if(session===undefined)return null;
+  return session?<Tracker user={session.user} dark={dark} setDark={setDark} th={{t,setT}}/>:<Auth/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
