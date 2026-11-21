@@ -135,7 +135,7 @@ function Card({s,onOpen,drag,readOnly,fr}){
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{["done","hiatus","dropped"].includes(s.status)&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
       {fr&&fr.length>0&&<p className="mt-2 text-xs font-semibold text-plum line-clamp-2">👥 {fr.map(x=>x.name+" · "+STAT[x.status]).join(", ")}</p>}
       {(s.status==="done"||s.status==="dropped")&&s.review&&<p className="mt-2 text-xs break-words whitespace-pre-line"><b className="text-plum">Review:</b> {s.review}</p>}
-      {s.notes&&<p className="mt-2 text-xs italic opacity-70 line-clamp-3 break-words">“{s.notes}”</p>}</div>
+      {s.notes&&<p className="mt-2 text-xs italic opacity-70 break-words whitespace-pre-line">“{s.notes}”</p>}</div>
   </article>}
 
 const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
