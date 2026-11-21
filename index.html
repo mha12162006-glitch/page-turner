@@ -19,6 +19,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
+body{overflow-x:hidden;padding-bottom:env(safe-area-inset-bottom)}
+@media(max-width:640px){header button:not([aria-label="My profile"]){padding:.4rem .85rem;font-size:.85rem}}
 :root{--accent:123 92 240;--bg:#F3F1F7}.dark{--bg:#14121F}body{background-color:var(--bg);background-attachment:fixed;color:#1F1B3A;transition:background-color .3s}.dark body{color:#EDEAF7}
 .drawer{animation:slide .28s cubic-bezier(.2,.8,.2,1)}@keyframes slide{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
 .pop{animation:pop .2s ease-out}@keyframes pop{from{transform:scale(.97);opacity:0}to{transform:none;opacity:1}}
@@ -115,7 +117,7 @@ function Auth(){
     const {error,data}=mode==="in"?await sb.auth.signInWithPassword({email,password:pw}):await sb.auth.signUp({email,password:pw});
     if(error)setMsg(error.message);else if(mode==="up"&&!data.session)setMsg("Check your email to confirm your account, then sign in.")};
   return <div className="min-h-screen grid place-items-center p-6"><form onSubmit={go} className="w-full max-w-sm rounded-3xl bg-white/70 dark:bg-white/5 p-8 space-y-4 pop">
-    <div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div><p className="opacity-70">Your queue of manhwa, manga and manhua, saved to your account.</p>
+    <div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div><p className="opacity-70">Your queue of manhwa, manga and manhua, saved to your account.</p>
     <input className="inp" type="email" placeholder="Email" value={email} onChange={e=>setE(e.target.value)} required/>
     <input className="inp" type="password" placeholder="Password (6+ characters)" value={pw} onChange={e=>setP(e.target.value)} minLength={6} required/>
     {msg&&<p className="text-sm text-rose-500">{msg}</p>}
@@ -187,9 +189,9 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly,fr}){
 
 function Filters({f,setF,items}){
   const uniq=k=>[...new Set(items.flatMap(i=>Array.isArray(i[k])?i[k]:[i[k]]).filter(Boolean))].sort();
-  const S=({k,label,opts})=><select className="inp !w-auto" value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}><option value="">{label}</option>{opts.map(o=><option key={o}>{o}</option>)}</select>;
-  return <div className="flex gap-2 flex-wrap items-center">
-    <input className="inp !w-48" placeholder="Search my list" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/>
+  const S=({k,label,opts})=><select className="inp sm:!w-auto" value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}><option value="">{label}</option>{opts.map(o=><option key={o}>{o}</option>)}</select>;
+  return <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:items-center">
+    <input className="inp col-span-2 sm:!w-48" placeholder="Search my list" value={f.q} onChange={e=>setF({...f,q:e.target.value})}/>
     <S k="format" label="Category" opts={FORMATS}/><S k="tag" label="Trope" opts={uniq("tags")}/><S k="source" label="Source" opts={uniq("source")}/>
     <button onClick={()=>setF({...f,top:!f.top})} className={"rounded-full px-4 py-2 text-sm font-bold "+(f.top?"bg-amber-400 text-black":"bg-plum/10")}>★ Top picks</button></div>}
 
@@ -265,8 +267,8 @@ function Tracker({user,dark,setDark,th}){
     const {error}=await sb.from("series").insert(rows.map((r,i)=>({...r,position:items.length+i})));
     error?alert(error.message):(say("Imported "+rows.length+" titles"),load())};
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-    <header className="flex flex-wrap items-center gap-3 justify-between"><div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div>
-      <div className="flex gap-2 flex-wrap">
+    <header className="flex flex-col sm:flex-row items-center gap-4 justify-between"><div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div>
+      <div className="flex gap-2 flex-wrap justify-center sm:justify-end items-center">
         <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         
@@ -275,11 +277,11 @@ function Tracker({user,dark,setDark,th}){
         <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button>
         <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button></div></header>
-    <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
+    <nav className="flex gap-2 flex-wrap justify-center sm:justify-start">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-3 sm:px-5 py-1.5 sm:py-2 text-sm sm:text-base font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
     <Filters f={f} setF={setF} items={items}/>
-    {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
+    {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60 text-center sm:text-left">Drag cards to set your reading order. It saves automatically.</p>}
     {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
       {visible.map((s,i)=><Card key={s.id} s={s} fr={friendHas(s)} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
     {open&&<Drawer item={open} fr={open.id?friendHas(open):[]} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
     {pp&&<ProfilePanel user={user} prof={prof} items={items} onSave={saveProf} onClose={()=>setPP(false)}/>}
@@ -300,10 +302,10 @@ function Shared({uid,sid,dark,setDark,me}){
   const pill="rounded-full bg-plum/15 font-bold px-4 py-2";
   const friendBtn=me===undefined||me?.id===uid?null:!me?<a href={location.href.split("#")[0]} className={pill}>Sign in to add friend</a>:rel?.status==="accepted"?<span className={pill}>✓ Friends</span>:rel?.dir==="out"?<span className={pill}>Request sent</span>:<button onClick={doAdd} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">{rel?"Accept friend request":"+ Add friend"}</button>;
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-    <header className="flex justify-between items-center"><div className="flex items-center gap-3"><Avatar url={who.avatar_url} name={who.display_name} size={56}/><div><h1 className="text-3xl font-extrabold">{sid?"A recommendation from "+(who.display_name||"a friend"):who.display_name?who.display_name+"’s reading list":"A reading list to browse"}</h1>{who.bio&&<p className="opacity-70">{who.bio}</p>}</div></div><div className="flex gap-2 items-center flex-wrap">{me&&<a href="#/" className={pill}>← My list</a>}{friendBtn}<button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></div></header>
+    <header className="flex flex-col sm:flex-row gap-4 justify-between items-center text-center sm:text-left"><div className="flex flex-col sm:flex-row items-center gap-3"><Avatar url={who.avatar_url} name={who.display_name} size={56}/><div><h1 className="text-2xl sm:text-3xl font-extrabold">{sid?"A recommendation from "+(who.display_name||"a friend"):who.display_name?who.display_name+"’s reading list":"A reading list to browse"}</h1>{who.bio&&<p className="opacity-70">{who.bio}</p>}</div></div><div className="flex gap-2 items-center flex-wrap justify-center">{me&&<a href="#/" className={pill}>← My list</a>}{friendBtn}<button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></div></header>
     {items===null?<p>Loading…</p>:items.length===0?<p className="opacity-70">This list is private or empty.</p>:
     STATUS.map(([k,l])=>{const g=items.filter(i=>i.status===k);return g.length>0&&<section key={k}><h2 className="text-xl font-bold mb-3">{l}</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{g.map(s=><Card key={s.id} s={s} readOnly fr={youHave(s)} onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">{g.map(s=><Card key={s.id} s={s} readOnly fr={youHave(s)} onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
     {open&&<Drawer item={open} readOnly fr={youHave(open)} onClose={()=>setOpen(null)}/>}
     <p className="text-sm opacity-60"><a className="underline" href={location.href.split("#")[0]}>Make your own list</a></p></div>}
 
