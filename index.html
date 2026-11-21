@@ -41,7 +41,7 @@ const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{
 const STATUS=[["reading","Reading"],["want","Want to Read"],["hiatus","Read on Hiatus"],["dropped","Dropped"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
 const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
-const TABS=STATUS;
+const TABS=[...STATUS.slice(0,3),["recs","Friend Recommend"],...STATUS.slice(3)];
 const STAT=Object.fromEntries(STATUS);
 const norm=t=>(t||"").toLowerCase().replace(/[^a-z0-9]/g,"");
 const same=(a,b)=>(a.anilist_id&&a.anilist_id===b.anilist_id)||(norm(a.title)!==""&&norm(a.title)===norm(b.title));
@@ -125,6 +125,28 @@ function Auth(){
     <button type="button" className="text-sm underline opacity-70" onClick={()=>setM(mode==="in"?"up":"in")}>{mode==="in"?"New here? Create an account":"Have an account? Sign in"}</button>
   </form></div>}
 
+function FriendLine({x,showName=true}){
+  const head=[showName&&x.name,STAT[x.status],x.priority&&"★ Top pick",["done","dropped"].includes(x.status)&&x.rating!=null&&x.rating+"/10"].filter(Boolean).join(" · ");
+  return <div className="text-xs space-y-0.5"><p className="font-bold text-plum">{head}</p>
+    {x.review&&<p className="break-words whitespace-pre-line"><b>Review:</b> {x.review}</p>}
+    {x.notes&&<p className="italic opacity-70 break-words whitespace-pre-line">“{x.notes}”</p>}</div>}
+function RecsView({recs,fp,items,onAdd,onDismiss}){
+  if(!recs.length)return <div className="text-center py-24 opacity-70"><p className="text-xl font-bold">No recommendations yet</p><p>When a friend recommends a series to you, it shows up here.</p></div>;
+  return <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">{recs.map(r=>{const s=r.series,pr=fp[r.from_user]||{},name=pr.display_name||"A friend",have=items.some(i=>same(i,s));
+    return <div key={r.id} className="rounded-2xl bg-white dark:bg-white/5 shadow-sm overflow-hidden flex">
+      <div className="w-28 shrink-0 bg-plum/10">{s.cover_url&&<img src={s.cover_url} alt="" className="w-full h-full object-cover"/>}</div>
+      <div className="p-3 flex-1 space-y-2 min-w-0"><div className="flex items-center gap-2 text-xs font-bold text-plum"><Avatar url={pr.avatar_url} name={name} size={22}/>💌 {name} recommends</div>
+        <h3 className="font-bold leading-tight">{s.title}</h3><p className="text-xs opacity-60">{s.format}{s.pub_status?" · "+s.pub_status:""}</p>
+        <FriendLine showName={false} x={{status:s.status,rating:s.rating,review:s.review,notes:s.notes,priority:s.priority}}/>
+        <div className="flex gap-2 flex-wrap pt-1">{have?<span className="text-sm font-bold opacity-70">✓ On your list</span>:<button onClick={()=>onAdd(r,name)} className="rounded-full bg-plum text-white text-sm font-bold px-3 py-1">+ Want to Read</button>}
+          <button onClick={()=>onDismiss(r)} className="rounded-full bg-plum/15 text-sm font-bold px-3 py-1">Dismiss</button></div></div></div>})}</div>}
+function RecModal({series,friends,onSend,onClose}){const [sent,setSent]=useState([]);
+  return <div className="fixed inset-0 z-[60] grid place-items-center bg-black/50 p-4" onClick={onClose}><div className="pop w-full max-w-sm rounded-3xl bg-paper p-6 space-y-3" onClick={e=>e.stopPropagation()}>
+    <h3 className="text-xl font-extrabold">Recommend “{series.title}”</h3>
+    {friends.length===0&&<p className="text-sm opacity-70">Add some friends first, then you can send recommendations.</p>}
+    {friends.map(f=><div key={f.uid} className="flex items-center gap-3"><Avatar url={f.avatar} name={f.name} size={36}/><span className="font-semibold flex-1 truncate">{f.name}</span>
+      {sent.includes(f.uid)?<span className="text-sm font-bold text-plum">✓ Sent</span>:<button onClick={async()=>{if(await onSend(f.uid))setSent(x=>[...x,f.uid])}} className="rounded-full bg-plum text-white text-sm font-bold px-4 py-1.5">Send</button>}</div>)}
+    <button onClick={onClose} className="w-full rounded-xl bg-plum/15 font-bold py-2">Done</button></div></div>}
 function Card({s,onOpen,drag,readOnly,fr}){
   return <article draggable={!readOnly&&!!drag} {...(drag||{})} onClick={()=>onOpen(s)} className={"group cursor-pointer rounded-2xl overflow-hidden bg-white dark:bg-white/5 transition hover:-translate-y-1 "+(s.priority?"ring-2 ring-amber-400 shadow-[0_8px_30px_rgba(242,179,61,.3)]":"shadow-sm hover:shadow-lg")}>
     <div className="relative aspect-[2/3] bg-plum/10">
@@ -135,14 +157,14 @@ function Card({s,onOpen,drag,readOnly,fr}){
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
       {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{["done","hiatus","dropped"].includes(s.status)&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
-      {fr&&fr.length>0&&<p className="mt-2 text-xs font-semibold text-plum line-clamp-2">👥 {fr.map(x=>x.name+" · "+STAT[x.status]).join(", ")}</p>}
+      {fr&&fr.length>0&&<div className="mt-2 space-y-2 border-t border-plum/20 pt-2">{fr.map((x,i)=><FriendLine key={i} x={x}/>)}</div>}
       {(s.status==="done"||s.status==="dropped")&&s.review&&<p className="mt-2 text-xs break-words whitespace-pre-line"><b className="text-plum">Review:</b> {s.review}</p>}
       {s.notes&&<p className="mt-2 text-xs italic opacity-70 break-words whitespace-pre-line">“{s.notes}”</p>}</div>
   </article>}
 
 const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
 function Auto({value,...p}){const r=useRef();useEffect(()=>{const e=r.current;if(e){e.style.height="auto";e.style.height=e.scrollHeight+2+"px"}},[value]);return <textarea ref={r} value={value} {...p}/>}
-function Drawer({item,onClose,onSave,onDelete,onShare,readOnly,fr}){
+function Drawer({item,onClose,onSave,onDelete,onShare,onRecommend,readOnly,fr}){
   const isNew=!item.id;
   const [f,setF]=useState({...blank,...item,genres:(item.genres||[]).join(", "),tags:(item.tags||[]).join(", "),media:(item.media||[]).join("\n")});
   const [q,setQ]=useState(""),[res,setRes]=useState([]),[busy,setBusy]=useState(false);
@@ -175,15 +197,16 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly,fr}){
       {!readOnly&&<L t="Where did you find it? (TikTok, a friend, Reddit…)"><input className="inp" value={f.source||""} onChange={e=>set("source",e.target.value)}/></L>}
       {!readOnly&&<L t="Moodboard: image or TikTok links, one per line"><textarea className="inp" rows={3} value={f.media} onChange={e=>set("media",e.target.value)}/></L>}
       {media.length>0&&<div className="grid grid-cols-3 gap-2">{media.map(u=>isImg(u)?<a key={u} href={u} target="_blank"><img src={u} className="rounded-lg aspect-square object-cover w-full"/></a>:<a key={u} href={u} target="_blank" className="rounded-lg aspect-square grid place-items-center bg-plum/10 text-sm font-bold p-2 text-center">▶ Open video</a>)}</div>}
-      {fr&&fr.length>0&&<div className="rounded-2xl bg-plum/10 p-4 space-y-2"><p className="font-bold">👥 Who else has this</p>{fr.map((x,i)=><div key={i} className="flex items-center gap-3"><Avatar url={x.avatar} name={x.name} size={32}/><span className="font-semibold">{x.name}</span><span className="ml-auto text-sm opacity-80">{STAT[x.status]}{x.rating!=null?" · "+x.rating+"/10":""}</span></div>)}</div>}
+      {fr&&fr.length>0&&<div className="rounded-2xl bg-plum/10 p-4 space-y-2"><p className="font-bold">👥 Who else has this</p>{fr.map((x,i)=><div key={i} className="flex gap-3"><Avatar url={x.avatar} name={x.name} size={32}/><div className="flex-1 text-sm"><FriendLine x={x}/></div></div>)}</div>}
       {!readOnly&&<L t="Personal notes / footnotes"><Auto className="inp" rows={3} value={f.notes||""} onChange={e=>set("notes",e.target.value)}/></L>}
       <div className={"rounded-2xl p-4 space-y-3 transition "+(fin?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
         <p className="font-bold">{fin?"Your verdict":"Unlocks when you mark it Completed, Read on Hiatus or Dropped"}</p>
         <L t="Final rating (0–10)"><input type="number" min="0" max="10" step="0.5" className="inp" disabled={readOnly||!fin} value={f.rating??""} onChange={e=>set("rating",e.target.value)}/></L>
         <L t="Review"><Auto className="inp" rows={4} disabled={readOnly||!fin} value={f.review||""} onChange={e=>set("review",e.target.value)}/></L></div>
-      {!readOnly&&<div className="flex gap-2 sticky bottom-0 py-3 bg-paper dark:bg-night">
+      {!readOnly&&<div className="flex flex-wrap gap-2 sticky bottom-0 py-3 bg-paper dark:bg-night">
         <button onClick={save} className="flex-1 rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110">{isNew?"Add to my list":"Save changes"}</button>
         {!isNew&&<button onClick={()=>onShare(item)} className="rounded-xl bg-plum/15 px-4 font-bold">Share rec</button>}
+        {!isNew&&onRecommend&&<button onClick={()=>onRecommend(item)} className="rounded-xl bg-plum/15 px-4 font-bold">💌 Recommend</button>}
         {!isNew&&<button onClick={()=>confirm("Delete this series?")&&onDelete(item)} className="rounded-xl bg-rose-500/15 text-rose-500 px-4 font-bold">Delete</button>}</div>}
     </div></div>}
 
@@ -229,7 +252,7 @@ function FriendsPanel({me,rows,prof,onClose,onAct,onAdd,onLink}){
       <button onClick={onLink} className="w-full rounded-xl bg-plum/15 font-bold py-2">Copy my link to send to friends</button></div></div></div>}
 
 function Tracker({user,dark,setDark,th}){
-  const [items,setItems]=useState([]),[tab,setTab]=useState("reading"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false),[frs,setFrs]=useState([]),[fp,setFp]=useState({}),[fs,setFs]=useState([]),[fpanel,setFpanel]=useState(false);
+  const [items,setItems]=useState([]),[tab,setTab]=useState("reading"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false),[frs,setFrs]=useState([]),[fp,setFp]=useState({}),[fs,setFs]=useState([]),[fpanel,setFpanel]=useState(false),[recs,setRecs]=useState([]),[recFor,setRecFor]=useState(null);
   const dragIdx=useRef(null),fileRef=useRef();
   const load=async()=>{const {data}=await sb.from("series").select("*").eq("user_id",user.id).order("position");setItems(data||[])};
   useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
@@ -246,7 +269,14 @@ function Tracker({user,dark,setDark,th}){
     const [a,b]=await Promise.all([sb.from("profiles").select("*").in("user_id",ids),acc.length?sb.from("series").select("*").in("user_id",acc):{data:[]}]);
     setFp(Object.fromEntries((a.data||[]).map(x=>[x.user_id,x])));setFs(b.data||[])};
   useEffect(()=>{loadFriends();const ch=sb.channel("fr-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"friendships"},loadFriends).subscribe();return()=>sb.removeChannel(ch)},[]);
-  const friendHas=x=>fs.filter(y=>same(x,y)).map(y=>({name:fp[y.user_id]?.display_name||"A friend",avatar:fp[y.user_id]?.avatar_url,status:y.status,rating:y.rating}));
+  const friendHas=x=>fs.filter(y=>same(x,y)).map(y=>({name:fp[y.user_id]?.display_name||"A friend",avatar:fp[y.user_id]?.avatar_url,status:y.status,rating:y.rating,review:y.review,notes:y.notes,priority:y.priority}));
+  const loadRecs=async()=>{const {data}=await sb.from("recommendations").select("*, series(*)").eq("to_user",user.id).order("created_at",{ascending:false});setRecs((data||[]).filter(r=>r.series))};
+  useEffect(()=>{loadRecs();const ch=sb.channel("rec-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"recommendations"},loadRecs).subscribe();return()=>sb.removeChannel(ch)},[]);
+  const friendList=frs.filter(r=>r.status==="accepted").map(r=>{const uid=r.requester===user.id?r.addressee:r.requester;return {uid,name:fp[uid]?.display_name||"Friend",avatar:fp[uid]?.avatar_url}});
+  const sendRec=async uid=>{const {error}=await sb.from("recommendations").insert({to_user:uid,series_id:recFor.id});if(error&&error.code!=="23505"){alert(error.message);return false}return true};
+  const addRec=async(r,name)=>{const x=r.series;const {error}=await sb.from("series").insert({title:x.title,cover_url:x.cover_url,format:x.format,genres:x.genres,synopsis:x.synopsis,anilist_id:x.anilist_id,pub_status:x.pub_status,status:"want",source:"Recommended by "+name,position:Math.max(-1,...items.map(i=>i.position))+1});
+    if(error)return alert(error.message);load();say("Added to Want to Read")};
+  const dismissRec=async r=>{await sb.from("recommendations").delete().eq("id",r.id);loadRecs()};
   const incoming=frs.filter(r=>r.status==="pending"&&r.addressee===user.id).length;
   const fAct=async(a,r)=>{const {error}=await (a==="accept"?sb.from("friendships").update({status:"accepted"}).eq("id",r.id):sb.from("friendships").delete().eq("id",r.id));if(error)alert(error.message);loadFriends()};
   const fAdd=async txt=>{const m=txt.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);if(!m)return alert("That does not look like a share link.");
@@ -269,7 +299,7 @@ function Tracker({user,dark,setDark,th}){
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
     <header className="flex flex-col sm:flex-row items-center gap-4 justify-between"><div className="flex items-center gap-3"><Logo size={48}/><h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Manhwa Tracker</h1></div>
       <div className="flex gap-2 flex-wrap justify-center sm:justify-end items-center">
-        <button onClick={()=>setOpen({...blank,status:tab==="active"?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
+        <button onClick={()=>setOpen({...blank,status:["active","recs"].includes(tab)?"want":tab})} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">+ Add series</button>
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         
         
@@ -277,13 +307,14 @@ function Tracker({user,dark,setDark,th}){
         <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button>
         <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button></div></header>
-    <nav className="flex gap-2 flex-wrap justify-center sm:justify-start">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-3 sm:px-5 py-1.5 sm:py-2 text-sm sm:text-base font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
-    <Filters f={f} setF={setF} items={items}/>
+    <nav className="flex gap-2 flex-wrap justify-center sm:justify-start">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-3 sm:px-5 py-1.5 sm:py-2 text-sm sm:text-base font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{k==="recs"?recs.length:items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
+    {tab!=="recs"&&<Filters f={f} setF={setF} items={items}/>}
     {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60 text-center sm:text-left">Drag cards to set your reading order. It saves automatically.</p>}
-    {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
+    {tab==="recs"?<RecsView recs={recs} fp={fp} items={items} onAdd={addRec} onDismiss={dismissRec}/>:visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
       {visible.map((s,i)=><Card key={s.id} s={s} fr={friendHas(s)} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
-    {open&&<Drawer item={open} fr={open.id?friendHas(open):[]} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
+    {open&&<Drawer item={open} fr={open.id?friendHas(open):[]} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)} onRecommend={s=>setRecFor(s)}/>}
+    {recFor&&<RecModal series={recFor} friends={friendList} onSend={sendRec} onClose={()=>setRecFor(null)}/>}
     {pp&&<ProfilePanel user={user} prof={prof} items={items} onSave={saveProf} onClose={()=>setPP(false)}/>}
     {fpanel&&<FriendsPanel me={user.id} rows={frs} prof={fp} onClose={()=>setFpanel(false)} onAct={fAct} onAdd={fAdd} onLink={()=>link()}/>}
     {panel&&<ThemePanel th={th} dark={dark} setDark={setDark} onClose={()=>setPanel(false)}/>}
@@ -298,7 +329,7 @@ function Shared({uid,sid,dark,setDark,me}){
   const clean=s=>({...s,notes:null,source:null,media:[]});
   const rel=me?relWith(rows,me.id,uid):null;
   const doAdd=async()=>{const {error}=await addFriend(me.id,uid,rows);if(error)return alert(error.message);await loadRel();loadAll()};
-  const youHave=x=>me&&me.id!==uid?mine.filter(y=>same(x,y)).map(y=>({name:"You",status:y.status,rating:y.rating})):[];
+  const youHave=x=>me&&me.id!==uid?mine.filter(y=>same(x,y)).map(y=>({name:"You",status:y.status,rating:y.rating,review:y.review,notes:y.notes,priority:y.priority})):[];
   const pill="rounded-full bg-plum/15 font-bold px-4 py-2";
   const friendBtn=me===undefined||me?.id===uid?null:!me?<a href={location.href.split("#")[0]} className={pill}>Sign in to add friend</a>:rel?.status==="accepted"?<span className={pill}>✓ Friends</span>:rel?.dir==="out"?<span className={pill}>Request sent</span>:<button onClick={doAdd} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">{rel?"Accept friend request":"+ Add friend"}</button>;
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
