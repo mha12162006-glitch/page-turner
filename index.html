@@ -125,6 +125,7 @@ function Card({s,onOpen,drag,readOnly}){
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
       {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{["done","hiatus","dropped"].includes(s.status)&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
+      {s.status==="done"&&s.review&&<p className="mt-2 text-xs line-clamp-4 break-words"><b className="text-plum">Review:</b> {s.review}</p>}
       {s.notes&&<p className="mt-2 text-xs italic opacity-70 line-clamp-3 break-words">“{s.notes}”</p>}</div>
   </article>}
 
