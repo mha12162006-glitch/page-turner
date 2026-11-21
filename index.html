@@ -40,6 +40,14 @@ const STATUS=[["reading","Reading"],["want","Want to Read"],["hiatus","Read on H
 const FORMATS=["Manhwa","Manga","Manhua"];
 const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
 const TABS=STATUS;
+const STAT=Object.fromEntries(STATUS);
+const norm=t=>(t||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const same=(a,b)=>(a.anilist_id&&a.anilist_id===b.anilist_id)||(norm(a.title)!==""&&norm(a.title)===norm(b.title));
+const relWith=(rows,me,uid)=>{const f=rows.find(r=>(r.requester===me&&r.addressee===uid)||(r.addressee===me&&r.requester===uid));return f?{...f,dir:f.requester===me?"out":"in"}:null};
+async function addFriend(me,uid,rows){const ex=relWith(rows,me,uid);
+  if(ex&&ex.dir==="in"&&ex.status==="pending")return await sb.from("friendships").update({status:"accepted"}).eq("id",ex.id);
+  if(ex)return {};
+  return await sb.from("friendships").insert({addressee:uid})}
 const PRESETS={Lavender:["#7B5CF0","#F3F1F7","#14121F"],Sakura:["#EC4899","#FDF1F5","#1F121A"],Matcha:["#22A06B","#EEF6F0","#101A15"],Ocean:["#0E87DC","#EEF5FA","#0F1823"],Peach:["#F4723C","#FFF3EA","#1E1511"]};
 const rgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)).join(" ");
 function applyTheme(t,dark){const p=PRESETS[t.preset]||PRESETS.Lavender,a=t.accent||p[0],s=document.documentElement.style;
@@ -115,7 +123,7 @@ function Auth(){
     <button type="button" className="text-sm underline opacity-70" onClick={()=>setM(mode==="in"?"up":"in")}>{mode==="in"?"New here? Create an account":"Have an account? Sign in"}</button>
   </form></div>}
 
-function Card({s,onOpen,drag,readOnly}){
+function Card({s,onOpen,drag,readOnly,fr}){
   return <article draggable={!readOnly&&!!drag} {...(drag||{})} onClick={()=>onOpen(s)} className={"group cursor-pointer rounded-2xl overflow-hidden bg-white dark:bg-white/5 transition hover:-translate-y-1 "+(s.priority?"ring-2 ring-amber-400 shadow-[0_8px_30px_rgba(242,179,61,.3)]":"shadow-sm hover:shadow-lg")}>
     <div className="relative aspect-[2/3] bg-plum/10">
       {s.cover_url?<img src={s.cover_url} alt="" loading="lazy" className="w-full h-full object-cover"/>:<div className="h-full grid place-items-center p-4 text-center font-bold opacity-60">{s.title}</div>}
@@ -125,12 +133,13 @@ function Card({s,onOpen,drag,readOnly}){
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
       {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
       <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{["done","hiatus","dropped"].includes(s.status)&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
+      {fr&&fr.length>0&&<p className="mt-2 text-xs font-semibold text-plum line-clamp-2">👥 {fr.map(x=>x.name+" · "+STAT[x.status]).join(", ")}</p>}
       {s.status==="done"&&s.review&&<p className="mt-2 text-xs line-clamp-4 break-words"><b className="text-plum">Review:</b> {s.review}</p>}
       {s.notes&&<p className="mt-2 text-xs italic opacity-70 line-clamp-3 break-words">“{s.notes}”</p>}</div>
   </article>}
 
 const L=({t,children})=><label className="block"><span className="text-sm font-semibold opacity-70">{t}</span>{children}</label>;
-function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
+function Drawer({item,onClose,onSave,onDelete,onShare,readOnly,fr}){
   const isNew=!item.id;
   const [f,setF]=useState({...blank,...item,genres:(item.genres||[]).join(", "),tags:(item.tags||[]).join(", "),media:(item.media||[]).join("\n")});
   const [q,setQ]=useState(""),[res,setRes]=useState([]),[busy,setBusy]=useState(false);
@@ -163,6 +172,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
       {!readOnly&&<L t="Where did you find it? (TikTok, a friend, Reddit…)"><input className="inp" value={f.source||""} onChange={e=>set("source",e.target.value)}/></L>}
       {!readOnly&&<L t="Moodboard: image or TikTok links, one per line"><textarea className="inp" rows={3} value={f.media} onChange={e=>set("media",e.target.value)}/></L>}
       {media.length>0&&<div className="grid grid-cols-3 gap-2">{media.map(u=>isImg(u)?<a key={u} href={u} target="_blank"><img src={u} className="rounded-lg aspect-square object-cover w-full"/></a>:<a key={u} href={u} target="_blank" className="rounded-lg aspect-square grid place-items-center bg-plum/10 text-sm font-bold p-2 text-center">▶ Open video</a>)}</div>}
+      {fr&&fr.length>0&&<div className="rounded-2xl bg-plum/10 p-4 space-y-2"><p className="font-bold">👥 Who else has this</p>{fr.map((x,i)=><div key={i} className="flex items-center gap-3"><Avatar url={x.avatar} name={x.name} size={32}/><span className="font-semibold">{x.name}</span><span className="ml-auto text-sm opacity-80">{STAT[x.status]}{x.rating!=null?" · "+x.rating+"/10":""}</span></div>)}</div>}
       {!readOnly&&<L t="Personal notes / footnotes"><textarea className="inp" rows={3} value={f.notes||""} onChange={e=>set("notes",e.target.value)}/></L>}
       <div className={"rounded-2xl p-4 space-y-3 transition "+(fin?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
         <p className="font-bold">{fin?"Your verdict":"Unlocks when you mark it Completed, Read on Hiatus or Dropped"}</p>
@@ -200,10 +210,25 @@ function malImport(xml,uid){
   return {rows,anime:doc.getElementsByTagName("anime").length};
 }
 
+function FriendsPanel({me,rows,prof,onClose,onAct,onAdd,onLink}){
+  const [txt,setTxt]=useState("");
+  const other=r=>r.requester===me?r.addressee:r.requester,nm=r=>prof[other(r)]?.display_name||"Someone";
+  const inc=rows.filter(r=>r.status==="pending"&&r.addressee===me),out=rows.filter(r=>r.status==="pending"&&r.requester===me),fr=rows.filter(r=>r.status==="accepted");
+  const Row=({r,children})=><div className="flex items-center gap-3"><Avatar url={prof[other(r)]?.avatar_url} name={nm(r)} size={40}/><a href={"#/share/"+other(r)} className="font-bold flex-1 truncate hover:underline">{nm(r)}</a>{children}</div>;
+  const B=({onClick,children,cls})=><button onClick={onClick} className={"rounded-full px-3 py-1 text-sm font-bold "+(cls||"bg-plum/15")}>{children}</button>;
+  return <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}><div className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto" onClick={e=>e.stopPropagation()}>
+    <div className="flex justify-between items-center"><h2 className="text-2xl font-extrabold">Friends</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
+    {inc.length>0&&<div className="space-y-2"><p className="font-semibold">Friend requests</p>{inc.map(r=><Row key={r.id} r={r}><B onClick={()=>onAct("accept",r)} cls="bg-plum text-white">Accept</B><B onClick={()=>onAct("remove",r)}>Decline</B></Row>)}</div>}
+    <div className="space-y-2"><p className="font-semibold">My friends ({fr.length})</p>{fr.length===0&&<p className="text-sm opacity-60">No friends yet. Send your link, or paste theirs below.</p>}{fr.map(r=><Row key={r.id} r={r}><B onClick={()=>confirm("Remove this friend?")&&onAct("remove",r)}>Remove</B></Row>)}</div>
+    {out.length>0&&<div className="space-y-2"><p className="font-semibold">Sent requests</p>{out.map(r=><Row key={r.id} r={r}><B onClick={()=>onAct("remove",r)}>Cancel</B></Row>)}</div>}
+    <div className="space-y-2"><p className="font-semibold">Add a friend</p><input className="inp" placeholder="Paste their share link" value={txt} onChange={e=>setTxt(e.target.value)}/>
+      <button onClick={()=>{onAdd(txt);setTxt("")}} className="w-full rounded-xl bg-plum text-white font-bold py-2">Send friend request</button>
+      <button onClick={onLink} className="w-full rounded-xl bg-plum/15 font-bold py-2">Copy my link to send to friends</button></div></div></div>}
+
 function Tracker({user,dark,setDark,th}){
-  const [items,setItems]=useState([]),[tab,setTab]=useState("reading"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false);
+  const [items,setItems]=useState([]),[tab,setTab]=useState("reading"),[f,setF]=useState(emptyF),[open,setOpen]=useState(null),[toast,setToast]=useState(""),[panel,setPanel]=useState(false),[prof,setProf]=useState({}),[pp,setPP]=useState(false),[frs,setFrs]=useState([]),[fp,setFp]=useState({}),[fs,setFs]=useState([]),[fpanel,setFpanel]=useState(false);
   const dragIdx=useRef(null),fileRef=useRef();
-  const load=async()=>{const {data}=await sb.from("series").select("*").order("position");setItems(data||[])};
+  const load=async()=>{const {data}=await sb.from("series").select("*").eq("user_id",user.id).order("position");setItems(data||[])};
   useEffect(()=>{load();const ch=sb.channel("series-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"series",filter:"user_id=eq."+user.id},load).subscribe();return()=>sb.removeChannel(ch)},[]);
   useEffect(()=>{sb.from("profiles").select("*").eq("user_id",user.id).maybeSingle().then(({data})=>setProf(data||{}))},[]);
   const say=m=>{setToast(m);setTimeout(()=>setToast(""),2500)};
@@ -212,6 +237,18 @@ function Tracker({user,dark,setDark,th}){
     if(r.error)return alert(r.error.message);setOpen(null);load();say(id?"Saved":"Added")};
   const saveProf=async p=>{const {error}=await sb.from("profiles").upsert({user_id:user.id,...p});if(error)return alert(error.message);setProf(x=>({...x,...p}));setPP(false);say("Profile saved")};
   const del=async s=>{await sb.from("series").delete().eq("id",s.id);setOpen(null);load()};
+  const loadFriends=async()=>{const {data}=await sb.from("friendships").select("*");const rows=data||[];setFrs(rows);
+    const oth=r=>r.requester===user.id?r.addressee:r.requester,ids=rows.map(oth),acc=rows.filter(r=>r.status==="accepted").map(oth);
+    if(!ids.length){setFp({});setFs([]);return}
+    const [a,b]=await Promise.all([sb.from("profiles").select("*").in("user_id",ids),acc.length?sb.from("series").select("*").in("user_id",acc):{data:[]}]);
+    setFp(Object.fromEntries((a.data||[]).map(x=>[x.user_id,x])));setFs(b.data||[])};
+  useEffect(()=>{loadFriends();const ch=sb.channel("fr-"+user.id).on("postgres_changes",{event:"*",schema:"public",table:"friendships"},loadFriends).subscribe();return()=>sb.removeChannel(ch)},[]);
+  const friendHas=x=>fs.filter(y=>same(x,y)).map(y=>({name:fp[y.user_id]?.display_name||"A friend",avatar:fp[y.user_id]?.avatar_url,status:y.status,rating:y.rating}));
+  const incoming=frs.filter(r=>r.status==="pending"&&r.addressee===user.id).length;
+  const fAct=async(a,r)=>{const {error}=await (a==="accept"?sb.from("friendships").update({status:"accepted"}).eq("id",r.id):sb.from("friendships").delete().eq("id",r.id));if(error)alert(error.message);loadFriends()};
+  const fAdd=async txt=>{const m=txt.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);if(!m)return alert("That does not look like a share link.");
+    const uid=m[0].toLowerCase();if(uid===user.id)return alert("That is your own link.");
+    const {error}=await addFriend(user.id,uid,frs);if(error)return alert(error.message);say("Friend request sent");loadFriends()};
   const link=async id=>{await sb.from("profiles").upsert({user_id:user.id,is_public:true});
     const url=location.href.split("#")[0]+"#/share/"+user.id+(id?"/"+id:"");await navigator.clipboard.writeText(url).catch(()=>prompt("Copy this link",url));say("Link copied")};
   const visible=useMemo(()=>applyF(items.filter(i=>tab==="active"?i.status!=="done":i.status===tab),f),[items,tab,f]);
@@ -233,7 +270,8 @@ function Tracker({user,dark,setDark,th}){
         <button onClick={()=>link()} className="rounded-full bg-plum/15 font-bold px-4 py-2">Share my list</button>
         
         
-                <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
+                <button onClick={()=>setFpanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">👥 Friends{incoming>0&&<span className="ml-1.5 rounded-full bg-rose-500 text-white text-xs px-1.5 py-0.5">{incoming}</span>}</button>
+        <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button>
         <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button></div></header>
     <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
@@ -241,23 +279,31 @@ function Tracker({user,dark,setDark,th}){
     {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
     {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-      {visible.map((s,i)=><Card key={s.id} s={s} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
-    {open&&<Drawer item={open} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
+      {visible.map((s,i)=><Card key={s.id} s={s} fr={friendHas(s)} onOpen={setOpen} drag={canDrag?{onDragStart:()=>dragIdx.current=i,onDragOver:e=>e.preventDefault(),onDrop:()=>drop(i)}:null}/>)}</div>}
+    {open&&<Drawer item={open} fr={open.id?friendHas(open):[]} onClose={()=>setOpen(null)} onSave={save} onDelete={del} onShare={s=>link(s.id)}/>}
     {pp&&<ProfilePanel user={user} prof={prof} items={items} onSave={saveProf} onClose={()=>setPP(false)}/>}
+    {fpanel&&<FriendsPanel me={user.id} rows={frs} prof={fp} onClose={()=>setFpanel(false)} onAct={fAct} onAdd={fAdd} onLink={()=>link()}/>}
     {panel&&<ThemePanel th={th} dark={dark} setDark={setDark} onClose={()=>setPanel(false)}/>}
     {toast&&<div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-ink text-white px-5 py-2 pop">{toast}</div>}
   </div>}
 
-function Shared({uid,sid,dark,setDark}){
-  const [items,setItems]=useState(null),[open,setOpen]=useState(null),[who,setWho]=useState({});
-  useEffect(()=>{sb.from("profiles").select("display_name,avatar_url,bio").eq("user_id",uid).maybeSingle().then(({data})=>setWho(data||{}));let q=sb.from("series").select("*").eq("user_id",uid).order("position");if(sid)q=q.eq("id",sid);q.then(({data})=>setItems(data||[]))},[]);
+function Shared({uid,sid,dark,setDark,me}){
+  const [items,setItems]=useState(null),[open,setOpen]=useState(null),[who,setWho]=useState({}),[rows,setRows]=useState([]),[mine,setMine]=useState([]);
+  const loadAll=()=>{sb.from("profiles").select("display_name,avatar_url,bio").eq("user_id",uid).maybeSingle().then(({data})=>setWho(data||{}));let q=sb.from("series").select("*").eq("user_id",uid).order("position");if(sid)q=q.eq("id",sid);q.then(({data})=>setItems(data||[]))};
+  const loadRel=async()=>{if(!me)return;const [a,b]=await Promise.all([sb.from("friendships").select("*"),sb.from("series").select("*").eq("user_id",me.id)]);setRows(a.data||[]);setMine(b.data||[])};
+  useEffect(()=>{loadAll();loadRel()},[me?.id]);
   const clean=s=>({...s,notes:null,source:null,media:[]});
+  const rel=me?relWith(rows,me.id,uid):null;
+  const doAdd=async()=>{const {error}=await addFriend(me.id,uid,rows);if(error)return alert(error.message);await loadRel();loadAll()};
+  const youHave=x=>me&&me.id!==uid?mine.filter(y=>same(x,y)).map(y=>({name:"You",status:y.status,rating:y.rating})):[];
+  const pill="rounded-full bg-plum/15 font-bold px-4 py-2";
+  const friendBtn=me===undefined||me?.id===uid?null:!me?<a href={location.href.split("#")[0]} className={pill}>Sign in to add friend</a>:rel?.status==="accepted"?<span className={pill}>✓ Friends</span>:rel?.dir==="out"?<span className={pill}>Request sent</span>:<button onClick={doAdd} className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110">{rel?"Accept friend request":"+ Add friend"}</button>;
   return <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-    <header className="flex justify-between items-center"><div className="flex items-center gap-3"><Avatar url={who.avatar_url} name={who.display_name} size={56}/><div><h1 className="text-3xl font-extrabold">{sid?"A recommendation from "+(who.display_name||"a friend"):who.display_name?who.display_name+"’s reading list":"A reading list to browse"}</h1>{who.bio&&<p className="opacity-70">{who.bio}</p>}</div></div><button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></header>
+    <header className="flex justify-between items-center"><div className="flex items-center gap-3"><Avatar url={who.avatar_url} name={who.display_name} size={56}/><div><h1 className="text-3xl font-extrabold">{sid?"A recommendation from "+(who.display_name||"a friend"):who.display_name?who.display_name+"’s reading list":"A reading list to browse"}</h1>{who.bio&&<p className="opacity-70">{who.bio}</p>}</div></div><div className="flex gap-2 items-center flex-wrap">{me&&<a href="#/" className={pill}>← My list</a>}{friendBtn}<button onClick={()=>setDark(!dark)} className="rounded-full bg-plum/15 px-4 py-2">{dark?"☀":"☾"}</button></div></header>
     {items===null?<p>Loading…</p>:items.length===0?<p className="opacity-70">This list is private or empty.</p>:
     STATUS.map(([k,l])=>{const g=items.filter(i=>i.status===k);return g.length>0&&<section key={k}><h2 className="text-xl font-bold mb-3">{l}</h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{g.map(s=><Card key={s.id} s={s} readOnly onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
-    {open&&<Drawer item={open} readOnly onClose={()=>setOpen(null)}/>}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">{g.map(s=><Card key={s.id} s={s} readOnly fr={youHave(s)} onOpen={x=>setOpen(clean(x))}/>)}</div></section>})}
+    {open&&<Drawer item={open} readOnly fr={youHave(open)} onClose={()=>setOpen(null)}/>}
     <p className="text-sm opacity-60"><a className="underline" href={location.href.split("#")[0]}>Make your own list</a></p></div>}
 
 function App(){
@@ -270,7 +316,7 @@ function App(){
   useEffect(()=>{if(!sb)return;sb.auth.getSession().then(({data})=>setSession(data.session));const {data}=sb.auth.onAuthStateChange((_e,s)=>setSession(s));return()=>data.subscription.unsubscribe()},[]);
   if(!configured)return <Setup/>;
   const m=hash.match(/^#\/share\/([\w-]+)(?:\/([\w-]+))?/);
-  if(m)return <Shared uid={m[1]} sid={m[2]} dark={dark} setDark={setDark}/>;
+  if(m)return <Shared uid={m[1]} sid={m[2]} dark={dark} setDark={setDark} me={session===undefined?undefined:(session?.user||null)}/>;
   if(session===undefined)return null;
   return session?<Tracker user={session.user} dark={dark} setDark={setDark} th={{t,setT}}/>:<Auth/>;
 }
