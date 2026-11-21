@@ -36,7 +36,7 @@ const SUPABASE_ANON_KEY = (window.APP_CONFIG||{}).key || "PASTE_YOUR_ANON_PUBLIC
 const {useState,useEffect,useMemo,useRef}=React;
 const configured=!SUPABASE_URL.startsWith("PASTE");
 const sb=configured?supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}}):null;
-const STATUS=[["reading","Reading"],["want","Want to Read"],["hiatus","Read on Hiatus"],["done","Completed"]];
+const STATUS=[["reading","Reading"],["want","Want to Read"],["hiatus","Read on Hiatus"],["dropped","Dropped"],["done","Completed"]];
 const FORMATS=["Manhwa","Manga","Manhua"];
 const PUB=["Ongoing","Completed","On hiatus","Permanent hiatus","Discontinued","Not yet released"];
 const TABS=STATUS;
@@ -124,7 +124,7 @@ function Card({s,onOpen,drag,readOnly}){
     </div>
     <div className="p-3"><h3 className="font-bold leading-tight line-clamp-2">{s.title}</h3>
       {s.pub_status&&<p className="text-xs opacity-60">{s.pub_status}</p>}
-      <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{(s.status==="done"||s.status==="hiatus")&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
+      <div className="mt-1 flex items-center justify-between"><Stars v={s.excitement} size="text-sm"/>{["done","hiatus","dropped"].includes(s.status)&&s.rating!=null&&<span className="text-sm font-bold text-plum">{s.rating}/10</span>}</div>
       {s.notes&&<p className="mt-2 text-xs italic opacity-70 line-clamp-3 break-words">“{s.notes}”</p>}</div>
   </article>}
 
@@ -139,7 +139,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
   const pick=r=>{setF(p=>({...p,...r,genres:r.genres.join(", ")}));setRes([]);setQ("")};
   const save=()=>{if(!f.title.trim())return alert("Add a title first.");
     onSave({...f,genres:arr(f.genres),tags:arr(f.tags),media:arr(f.media),rating:f.rating===""||f.rating==null?null:Number(f.rating)})};
-  const media=arr(f.media),fin=(f.status==="done"||f.status==="hiatus");
+  const media=arr(f.media),fin=["done","hiatus","dropped"].includes(f.status);
   return <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
     <div className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4" onClick={e=>e.stopPropagation()}>
       <div className="flex items-center justify-between"><h2 className="text-2xl font-extrabold">{readOnly?f.title:isNew?"Add new series":"Edit series"}</h2><button onClick={onClose} className="text-2xl px-2" aria-label="Close">×</button></div>
@@ -164,7 +164,7 @@ function Drawer({item,onClose,onSave,onDelete,onShare,readOnly}){
       {media.length>0&&<div className="grid grid-cols-3 gap-2">{media.map(u=>isImg(u)?<a key={u} href={u} target="_blank"><img src={u} className="rounded-lg aspect-square object-cover w-full"/></a>:<a key={u} href={u} target="_blank" className="rounded-lg aspect-square grid place-items-center bg-plum/10 text-sm font-bold p-2 text-center">▶ Open video</a>)}</div>}
       {!readOnly&&<L t="Personal notes / footnotes"><textarea className="inp" rows={3} value={f.notes||""} onChange={e=>set("notes",e.target.value)}/></L>}
       <div className={"rounded-2xl p-4 space-y-3 transition "+(fin?"bg-plum/15 ring-2 ring-plum/40":"opacity-40")}>
-        <p className="font-bold">{fin?"Your verdict":"Unlocks when you mark it Completed or Read on Hiatus"}</p>
+        <p className="font-bold">{fin?"Your verdict":"Unlocks when you mark it Completed, Read on Hiatus or Dropped"}</p>
         <L t="Final rating (0–10)"><input type="number" min="0" max="10" step="0.5" className="inp" disabled={readOnly||!fin} value={f.rating??""} onChange={e=>set("rating",e.target.value)}/></L>
         <L t="Review"><textarea className="inp" rows={4} disabled={readOnly||!fin} value={f.review||""} onChange={e=>set("review",e.target.value)}/></L></div>
       {!readOnly&&<div className="flex gap-2 sticky bottom-0 py-3 bg-paper dark:bg-night">
@@ -235,7 +235,7 @@ function Tracker({user,dark,setDark,th}){
                 <button onClick={()=>setPanel(true)} className="rounded-full bg-plum/15 font-bold px-4 py-2">🎨 Theme</button>
         <button onClick={()=>sb.auth.signOut()} className="rounded-full px-3 py-2 text-sm opacity-70 underline">Sign out</button>
         <button onClick={()=>setPP(true)} className="rounded-full ring-2 ring-plum/40 hover:ring-plum transition" aria-label="My profile"><Avatar url={prof.avatar_url} name={prof.display_name||user.email} size={40}/></button></div></header>
-    <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="done"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
+    <nav className="flex gap-2 flex-wrap">{TABS.map(([k,l])=><button key={k} onClick={()=>setTab(k)} className={"rounded-full px-5 py-2 font-bold transition "+(k==="dropped"?"sm:ml-auto ":"")+(tab===k?"bg-ink text-white dark:bg-white dark:text-ink":"bg-plum/10")}>{l} <span className="opacity-60">{items.filter(i=>k==="active"?i.status!=="done":i.status===k).length}</span></button>)}</nav>
     <Filters f={f} setF={setF} items={items}/>
     {tab!=="done"&&canDrag&&visible.length>1&&<p className="text-sm opacity-60">Drag cards to set your reading order. It saves automatically.</p>}
     {visible.length===0?<div className="text-center py-24 opacity-70"><p className="text-xl font-bold">Nothing here yet</p><p>Add a series or change your filters.</p></div>:
