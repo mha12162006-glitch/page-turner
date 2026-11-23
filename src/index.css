@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  overflow-x: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@media (max-width: 640px) {
+  header button:not([aria-label="My profile"]) {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.85rem;
+  }
+}
+
+:root {
+  --accent: 123 92 240;
+  --bg: #F3F1F7;
+}
+
+.dark {
+  --bg: #14121F;
+}
+
+body {
+  background-color: var(--bg);
+  background-attachment: fixed;
+  color: #1F1B3A;
+  transition: background-color 0.3s;
+}
+
+.dark body {
+  color: #EDEAF7;
+}
+
+.drawer {
+  animation: slide 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.pop {
+  animation: pop 0.2s ease-out;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .pop {
+    animation: none;
+  }
+}
+
+.inp {
+  width: 100%;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.8rem;
+  background: rgb(var(--accent) / 0.07);
+  border: 1px solid rgb(var(--accent) / 0.2);
+  outline: none;
+}
+
+.inp:focus {
+  border-color: rgb(var(--accent));
+  box-shadow: 0 0 0 3px rgb(var(--accent) / 0.25);
+}
