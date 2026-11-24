@@ -1,4 +1,4 @@
-import { same } from "../lib/util";
+import { isHttp, same } from "../lib/util";
 import Avatar from "./Avatar";
 import { FriendLine } from "./Card";
 
@@ -24,7 +24,7 @@ export default function RecsView({ recs, fp, items, onAdd, onDismiss }) {
             className="rounded-2xl bg-white dark:bg-white/5 shadow-sm overflow-hidden flex"
           >
             <div className="w-28 shrink-0 bg-plum/10">
-              {s.cover_url && (
+              {isHttp(s.cover_url) && (
                 <img src={s.cover_url} alt="" className="w-full h-full object-cover" />
               )}
             </div>

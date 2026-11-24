@@ -6,7 +6,17 @@ export default function ProfilePanel({ user, prof, items, onSave, onClose }) {
   const [name, setName] = useState(prof.display_name || "");
   const [bio, setBio] = useState(prof.bio || "");
   const [av, setAv] = useState(prof.avatar_url || "");
+  const [pub, setPub] = useState(!!prof.is_public);
   const fr = useRef();
+  const togglePub = () => {
+    if (!pub) {
+      const ok = confirm(
+        "Turn on your public link? Anyone with the link can see your list, even without signing in. You can turn it off again at any time."
+      );
+      if (!ok) return;
+    }
+    setPub((v) => !v);
+  };
   const pick = async (e) => {
     const f = e.target.files[0];
     if (f)
@@ -92,13 +102,44 @@ export default function ProfilePanel({ user, prof, items, onSave, onClose }) {
             </div>
           ))}
         </div>
+        <div className="rounded-2xl bg-plum/10 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-bold">Public share link</p>
+              <p className="text-xs opacity-70">
+                {pub
+                  ? "On — anyone with the link can see your list."
+                  : "Off — only you can see your list."}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={pub}
+              aria-label="Public share link"
+              onClick={togglePub}
+              className={
+                "relative h-6 w-11 shrink-0 rounded-full transition " +
+                (pub ? "bg-plum" : "bg-plum/25")
+              }
+            >
+              <span
+                className={
+                  "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition " +
+                  (pub ? "translate-x-5" : "")
+                }
+              />
+            </button>
+          </div>
+        </div>
         <p className="text-sm opacity-60">Signed in as {user.email}</p>
         <button
           onClick={() =>
             onSave({
               display_name: name.trim() || null,
               bio: bio.trim() || null,
-              avatar_url: av || null
+              avatar_url: av || null,
+              is_public: pub
             })
           }
           className="w-full rounded-xl bg-plum text-white font-bold py-2.5 hover:brightness-110"

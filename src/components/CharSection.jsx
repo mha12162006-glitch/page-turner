@@ -109,7 +109,7 @@ export default function CharSection({
           ))}
           {nm.trim().length > 1 && !look && pool && matches.length === 0 && (
             <p className="text-xs opacity-60">
-              Not found in this series on AniList. You can add it by hand.
+              No AniList match for that name — you can still add it by hand.
             </p>
           )}
           <input

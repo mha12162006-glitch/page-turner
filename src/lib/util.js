@@ -51,9 +51,30 @@ export const emptyF = { q: "", format: "", tag: "", source: "", top: false };
 
 export const norm = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-export const same = (a, b) =>
-  (a.anilist_id && a.anilist_id === b.anilist_id) ||
-  (norm(a.title) !== "" && norm(a.title) === norm(b.title));
+const aid = (x) =>
+  x && x.anilist_id != null && x.anilist_id !== ""
+    ? String(x.anilist_id)
+    : "";
+
+export const same = (a, b) => {
+  if (!a || !b) return false;
+  const aa = aid(a);
+  return (
+    (!!aa && aa === aid(b)) ||
+    (norm(a.title) !== "" && norm(a.title) === norm(b.title))
+  );
+};
+
+export const isHttp = (u) => /^https?:\/\//i.test((u || "").trim());
+export const httpUrl = (u) => (isHttp(u) ? u.trim() : "");
+
+const charKey = (c) =>
+  [norm(c.name), (c.image_url || "").trim(), (c.comment || "").trim()].join("|");
+
+export const sameChars = (a = [], b = []) =>
+  a.length === b.length && a.every((c, i) => charKey(c) === charKey(b[i]));
+
+export const statusLabel = (s) => STAT[s] || "on your list";
 
 export const relWith = (rows, me, uid) => {
   const f = rows.find(
@@ -129,12 +150,12 @@ export function malImport(xml, uid) {
     reading: "reading",
     completed: "done",
     "plan to read": "want",
-    "on-hold": "want",
-    dropped: "want",
+    "on-hold": "hiatus",
+    dropped: "dropped",
     "1": "reading",
     "2": "done",
-    "3": "want",
-    "4": "want",
+    "3": "hiatus",
+    "4": "dropped",
     "6": "want"
   };
   const rows = [...doc.getElementsByTagName("manga")]

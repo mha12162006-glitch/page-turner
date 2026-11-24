@@ -1,4 +1,4 @@
-import { STAT } from "../lib/util";
+import { isHttp, STAT } from "../lib/util";
 import Avatar from "./Avatar";
 import Stars from "./Stars";
 
@@ -53,7 +53,7 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
       }
     >
       <div className="relative aspect-[2/3] bg-plum/10">
-        {s.cover_url ? (
+        {isHttp(s.cover_url) ? (
           <img
             src={s.cover_url}
             alt=""

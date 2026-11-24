@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { relWith } from "./util";
+import { relWith, same } from "./util";
 
 const SUPABASE_URL =
   (window.APP_CONFIG || {}).url || "PASTE_YOUR_PROJECT_URL";
@@ -17,6 +17,22 @@ export const sb = configured
       }
     })
   : null;
+
+export const isUniqueViolation = (error) =>
+  error?.code === "23505" ||
+  /duplicate key|unique constraint|already exists/i.test(error?.message || "");
+
+export async function findExistingSeries(userId, candidate, known = []) {
+  const local = (known || []).find((x) => same(x, candidate));
+  if (local) return local;
+  if (!userId) return null;
+  const { data, error } = await sb
+    .from("series")
+    .select("*")
+    .eq("user_id", userId);
+  if (error) return null;
+  return (data || []).find((x) => same(x, candidate)) || null;
+}
 
 export async function addFriend(me, uid, rows) {
   const ex = relWith(rows, me, uid);

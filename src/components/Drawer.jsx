@@ -1,17 +1,26 @@
 import { useEffect, useRef, useState } from "react";
 import { anilistDetail, searchAniList } from "../lib/anilist";
+import { GENRE_PRESETS, joinTags, splitTags, TROPE_PRESETS } from "../lib/tags";
 import {
   arr,
   blank,
   FORMATS,
+  httpUrl,
+  isHttp,
   isImg,
   norm,
   num,
   PUB,
   STATUS
 } from "../lib/util";
+import {
+  joinWarnings,
+  parseWarnings,
+  WARNING_PRESETS
+} from "../lib/warnings";
 import Avatar from "./Avatar";
 import CharSection from "./CharSection";
+import ChipPicker from "./ChipPicker";
 import { FriendLine } from "./Card";
 import Stars from "./Stars";
 
@@ -21,6 +30,50 @@ const L = ({ t, children }) => (
     {children}
   </label>
 );
+
+const hasText = (value) => !!String(value ?? "").trim();
+
+function mergeMissing(row, data) {
+  if (!data) return row;
+  const next = { ...row };
+  if (!hasText(next.cover_url) && hasText(data.cover_url)) {
+    next.cover_url = data.cover_url;
+  }
+  if (!hasText(next.synopsis) && hasText(data.synopsis)) {
+    next.synopsis = data.synopsis;
+  }
+  if (!hasText(next.pub_status) && hasText(data.pub_status)) {
+    next.pub_status = data.pub_status;
+  }
+  if (!splitTags(next.genres).length && splitTags(data.genres).length) {
+    next.genres = joinTags(data.genres);
+  }
+  if (!splitTags(next.tags).length && splitTags(data.tags).length) {
+    next.tags = joinTags(data.tags);
+  }
+  if (!parseWarnings(next.warnings).length && hasText(data.warnings)) {
+    next.warnings = joinWarnings(data.warnings);
+  }
+  if (next.total_chapters == null && data.total_chapters != null) {
+    next.total_chapters = data.total_chapters;
+  }
+  if (!hasText(next.read_url) && hasText(data.read_url)) {
+    next.read_url = data.read_url;
+  }
+  return next;
+}
+
+function mergePick(row, result) {
+  const next = {
+    ...row,
+    anilist_id: result.anilist_id,
+    title: result.title || row.title,
+    cover_url: result.cover_url || row.cover_url,
+    format: result.format || row.format,
+    pub_status: result.pub_status || row.pub_status
+  };
+  return mergeMissing(next, result);
+}
 
 function Auto({ value, ...p }) {
   const r = useRef();
@@ -45,34 +98,53 @@ export default function Drawer({
   readOnly,
   fr,
   chars0,
-  thoughts
+  thoughts,
+  notify
 }) {
   const isNew = !item.id;
-  const [f, setF] = useState({
+  const [f, setF] = useState(() => ({
     ...blank,
     ...item,
-    genres: (item.genres || []).join(", "),
-    tags: (item.tags || []).join(", "),
+    genres: joinTags(item.genres),
+    tags: joinTags(item.tags),
+    warnings: joinWarnings(item.warnings),
     media: (item.media || []).join("\n")
-  });
+  }));
   const [chars, setChars] = useState(chars0 || []);
   const [tot, setTot] = useState(false);
   const [q, setQ] = useState("");
   const [res, setRes] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [autoWarnings, setAutoWarnings] = useState("");
+  const [warnTouched, setWarnTouched] = useState(false);
+  const fRef = useRef(f);
+  const notice = notify || (() => {});
+  useEffect(() => {
+    fRef.current = f;
+  }, [f]);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const markAutoWarnings = (value) => {
+    const clean = joinWarnings(value);
+    if (!clean) return;
+    setAutoWarnings(clean);
+    setWarnTouched(false);
+  };
   useEffect(() => {
     if (!isNew || q.length < 3) return setRes([]);
     setBusy(true);
+    let live = true;
     const t = setTimeout(
       () =>
         searchAniList(q)
-          .then(setRes)
-          .catch(() => setRes([]))
-          .finally(() => setBusy(false)),
+          .then((rows) => live && setRes(rows))
+          .catch(() => live && setRes([]))
+          .finally(() => live && setBusy(false)),
       400
     );
-    return () => clearTimeout(t);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
   }, [q]);
   const setCh = (k, v) =>
     setF((p) => {
@@ -90,23 +162,26 @@ export default function Drawer({
       chapter: k === "done" && p.total_chapters ? p.total_chapters : p.chapter
     }));
   const pick = (r) => {
-    setF((p) => ({
-      ...p,
-      ...r,
-      genres: r.genres.join(", "),
-      tags: (r.tags || []).join(", ")
-    }));
+    const before = fRef.current;
+    setF((p) => mergePick(p, r));
+    if (
+      !parseWarnings(before.warnings).length &&
+      parseWarnings(r.warnings).length
+    ) {
+      markAutoWarnings(r.warnings);
+    }
     setRes([]);
     setQ("");
     anilistDetail(r.anilist_id)
       .then((d) => {
-        setF((p) => ({
-          ...p,
-          synopsis: p.synopsis || d.synopsis,
-          warnings: p.warnings || d.warnings,
-          total_chapters: p.total_chapters ?? d.total_chapters,
-          read_url: p.read_url || d.read_url
-        }));
+        const latest = fRef.current;
+        setF((p) => mergeMissing(p, d));
+        if (
+          !parseWarnings(latest.warnings).length &&
+          parseWarnings(d.warnings).length
+        ) {
+          markAutoWarnings(d.warnings);
+        }
         setChars((c) => (c.length ? c : d.chars));
       })
       .catch(() => {});
@@ -115,32 +190,39 @@ export default function Drawer({
     setBusy(true);
     try {
       let id = f.anilist_id;
-      let base = {};
+      let base = null;
       if (!id) {
         const r = (await searchAniList(f.title))[0];
-        if (!r) return alert("Could not find this title on AniList.");
+        if (!r) {
+          notice("Could not find this title on AniList.");
+          return;
+        }
         id = r.anilist_id;
         base = r;
+        const before = fRef.current;
+        setF((p) => ({ ...mergeMissing(p, base), anilist_id: id }));
+        if (
+          !parseWarnings(before.warnings).length &&
+          parseWarnings(base.warnings).length
+        ) {
+          markAutoWarnings(base.warnings);
+        }
       }
       const d = await anilistDetail(id);
-      setF((p) => ({
-        ...p,
-        anilist_id: id,
-        cover_url: p.cover_url || base.cover_url || "",
-        synopsis: p.synopsis || base.synopsis || d.synopsis || "",
-        pub_status: p.pub_status || base.pub_status || "",
-        genres: p.genres || d.genres.join(", "),
-        tags: [...new Set([...arr(p.tags), ...d.tags])].join(", "),
-        warnings: p.warnings || d.warnings,
-        total_chapters: p.total_chapters ?? d.total_chapters,
-        read_url: p.read_url || d.read_url
-      }));
+      const latest = fRef.current;
+      setF((p) => mergeMissing(p, d));
+      if (
+        !parseWarnings(latest.warnings).length &&
+        parseWarnings(d.warnings).length
+      ) {
+        markAutoWarnings(d.warnings);
+      }
       setChars((c) => [
         ...c,
         ...d.chars.filter((x) => !c.some((y) => norm(y.name) === norm(x.name)))
       ]);
     } catch (e) {
-      alert("AniList did not respond. Try again in a moment.");
+      // anilist.js announces failures; keep the drawer usable.
     } finally {
       setBusy(false);
     }
@@ -150,18 +232,20 @@ export default function Drawer({
     onSave(
       {
         ...f,
-        genres: arr(f.genres),
-        tags: arr(f.tags),
-        media: arr(f.media),
+        cover_url: httpUrl(f.cover_url) || null,
+        genres: splitTags(f.genres),
+        tags: splitTags(f.tags),
+        warnings: joinWarnings(f.warnings),
+        media: arr(f.media).map(httpUrl).filter(Boolean),
         rating: num(f.rating),
         chapter: num(f.chapter),
         total_chapters: num(f.total_chapters),
-        read_url: f.read_url || null
+        read_url: httpUrl(f.read_url) || null
       },
       chars
     );
   };
-  const media = arr(f.media);
+  const media = arr(f.media).map(httpUrl).filter(Boolean);
   const fin = ["done", "hiatus", "dropped"].includes(f.status);
   const showTot =
     tot || !!f.total_chapters || f.pub_status === "Completed" || f.status === "done";
@@ -228,7 +312,7 @@ export default function Drawer({
           </button>
         )}
         <div className="flex gap-4">
-          {f.cover_url && (
+          {isHttp(f.cover_url) && (
             <img
               src={f.cover_url}
               className="w-28 rounded-xl object-cover aspect-[2/3]"
@@ -433,30 +517,49 @@ export default function Drawer({
             onChange={(e) => set("synopsis", e.target.value)}
           />
         </L>
-        <L t="Genres (comma separated)">
-          <input
-            className="inp"
-            value={f.genres}
-            disabled={readOnly}
-            onChange={(e) => set("genres", e.target.value)}
-          />
-        </L>
-        <L t="Tropes and tags (e.g. Historical Romance, 90s Romance)">
-          <input
-            className="inp"
-            value={f.tags}
-            disabled={readOnly}
-            onChange={(e) => set("tags", e.target.value)}
-          />
-        </L>
-        <L t="Content / trigger warnings">
-          <input
-            className="inp"
-            value={f.warnings || ""}
-            disabled={readOnly}
-            onChange={(e) => set("warnings", e.target.value)}
-          />
-        </L>
+        <ChipPicker
+          title="Content / trigger warnings"
+          presets={WARNING_PRESETS}
+          value={f.warnings || ""}
+          readOnly={readOnly}
+          allowAdd={!readOnly}
+          placeholder="+ Add custom warning"
+          addLabel="Add"
+          hint={
+            readOnly
+              ? ""
+              : "No warnings auto-detected — select any that apply"
+          }
+          note={
+            autoWarnings &&
+            !warnTouched &&
+            f.warnings === autoWarnings
+              ? "auto-filled, please check"
+              : ""
+          }
+          onChange={(value) => {
+            setWarnTouched(true);
+            set("warnings", value);
+          }}
+        />
+        <ChipPicker
+          title="Genres"
+          presets={GENRE_PRESETS}
+          value={f.genres || ""}
+          readOnly={readOnly}
+          allowAdd={false}
+          onChange={(value) => set("genres", value)}
+        />
+        <ChipPicker
+          title="Tropes & tags"
+          presets={TROPE_PRESETS}
+          value={f.tags || ""}
+          readOnly={readOnly}
+          allowAdd={!readOnly}
+          placeholder="+ Add custom tag"
+          addLabel="Add"
+          onChange={(value) => set("tags", value)}
+        />
         {!readOnly && (
           <L t="Where did you find it? (TikTok, a friend, Reddit…)">
             <input
@@ -480,7 +583,12 @@ export default function Drawer({
           <div className="grid grid-cols-3 gap-2">
             {media.map((u) =>
               isImg(u) ? (
-                <a key={u} href={u} target="_blank">
+                <a
+                  key={u}
+                  href={u}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <img src={u} className="rounded-lg aspect-square object-cover w-full" />
                 </a>
               ) : (
@@ -488,6 +596,7 @@ export default function Drawer({
                   key={u}
                   href={u}
                   target="_blank"
+                  rel="noopener noreferrer"
                   className={
                     "rounded-lg aspect-square grid place-items-center " +
                     "bg-plum/10 text-sm font-bold p-2 text-center"

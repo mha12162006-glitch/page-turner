@@ -1,7 +1,12 @@
-import { useEffect, useState } from "react";
-import { enrich } from "../lib/anilist";
-import { addFriend, sb } from "../lib/supabase";
+import { useEffect, useRef, useState } from "react";
+import {
+  addFriend,
+  findExistingSeries,
+  isUniqueViolation,
+  sb
+} from "../lib/supabase";
 import { relWith, same, STATUS } from "../lib/util";
+import AlreadyOnList from "../components/AlreadyOnList";
 import Avatar from "../components/Avatar";
 import Card from "../components/Card";
 import Drawer from "../components/Drawer";
@@ -13,6 +18,21 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
   const [rows, setRows] = useState([]);
   const [mine, setMine] = useState([]);
   const [chs, setChs] = useState([]);
+  const [dupe, setDupe] = useState(null);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef();
+  const say = (m) => {
+    setToast(m);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
+  };
+  useEffect(() => {
+    const onNotice = (event) => {
+      say(event.detail?.message || "AniList did not respond. Try again.");
+    };
+    window.addEventListener("anilist:notice", onNotice);
+    return () => window.removeEventListener("anilist:notice", onNotice);
+  }, []);
   const loadAll = () => {
     sb.from("profiles")
       .select("display_name,avatar_url,bio")
@@ -45,7 +65,10 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
   const rel = me ? relWith(rows, me.id, uid) : null;
   const doAdd = async () => {
     const { error } = await addFriend(me.id, uid, rows);
-    if (error) return alert(error.message);
+    if (error) {
+      console.error("Adding friend failed:", error);
+      return say("Could not add that friend. Please try again.");
+    }
     await loadRel();
     loadAll();
   };
@@ -66,19 +89,24 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       : [];
   const canAdd = !!me && me.id !== uid;
   const addWant = async (x) => {
-    const { row, chars } = await enrich({
+    const row = {
       title: x.title,
       cover_url: x.cover_url,
       format: x.format,
-      genres: x.genres,
-      tags: x.tags,
-      warnings: x.warnings,
-      synopsis: x.synopsis,
+      genres: [...(x.genres || [])],
+      tags: [...(x.tags || [])],
+      warnings: x.warnings || "",
+      synopsis: x.synopsis || "",
       anilist_id: x.anilist_id,
       pub_status: x.pub_status,
       total_chapters: x.total_chapters,
       read_url: x.read_url
-    });
+    };
+    const dup = await findExistingSeries(me.id, row, mine);
+    if (dup) {
+      setDupe([dup]);
+      return;
+    }
     const { data, error } = await sb
       .from("series")
       .insert({
@@ -89,22 +117,43 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       })
       .select()
       .single();
-    if (error) return alert(error.message);
-    const src = chs.filter((c) => c.series_id === x.id);
-    const cs = src.length ? src : chars;
+    if (error) {
+      if (isUniqueViolation(error)) {
+        const existing = await findExistingSeries(me.id, row, []);
+        if (existing) {
+          setDupe([existing]);
+          return;
+        }
+      }
+      console.error("Adding from a friend failed:", error);
+      say("Could not add that series. Please try again.");
+      return;
+    }
+    const cs = chs.filter((c) => c.series_id === x.id);
+    let charNote = "";
     if (cs.length) {
-      await sb.from("series_characters").insert(
-        cs.map((c, k) => ({
-          series_id: data.id,
-          name: c.name,
-          image_url: c.image_url || null,
-          position: k
-        }))
-      );
+      try {
+        const ce = await sb.from("series_characters").insert(
+          cs.map((c, k) => ({
+            user_id: me.id,
+            series_id: data.id,
+            name: c.name,
+            image_url: c.image_url || null,
+            position: k
+          }))
+        );
+        if (ce.error) {
+          console.error("Saving characters failed:", ce.error);
+          charNote = "Added to your Want to Read. Characters could not be updated this time.";
+        }
+      } catch (err) {
+        console.error("Saving characters failed:", err);
+        charNote = "Added to your Want to Read. Characters could not be updated this time.";
+      }
     }
     await loadRel();
     setOpen(null);
-    alert("Added to your Want to Read.");
+    say(charNote || "Added to your Want to Read.");
   };
   const pill = "rounded-full bg-plum/15 font-bold px-4 py-2";
   const friendBtn =
@@ -182,12 +231,14 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       )}
       {open && (
         <Drawer
+          key={open.id || "new"}
           item={open}
           readOnly
           fr={youHave(open)}
           chars0={chs.filter((c) => c.series_id === open.id)}
           onAdd={canAdd ? addWant : undefined}
           onClose={() => setOpen(null)}
+          notify={say}
         />
       )}
       <p className="text-sm opacity-60">
@@ -195,6 +246,21 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           Make your own list
         </a>
       </p>
+      {dupe && (
+        <AlreadyOnList
+          items={dupe}
+          onOpen={(s) => setOpen(s)}
+          onClose={() => setDupe(null)}
+        />
+      )}
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 max-w-[90vw] pointer-events-none rounded-full bg-ink text-white text-center px-5 py-2 pop"
+        >
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { enrich } from "../lib/anilist";
-import { addFriend, sb } from "../lib/supabase";
+import { enrich, needsEnrichment } from "../lib/anilist";
+import {
+  addFriend,
+  findExistingSeries,
+  isUniqueViolation,
+  sb
+} from "../lib/supabase";
 import {
   applyF,
   blank,
@@ -9,9 +14,11 @@ import {
   norm,
   readMalFile,
   same,
+  sameChars,
   STATUS,
   TABS
 } from "../lib/util";
+import AlreadyOnList from "../components/AlreadyOnList";
 import Avatar from "../components/Avatar";
 import Card from "../components/Card";
 import Drawer from "../components/Drawer";
@@ -40,8 +47,11 @@ export default function Tracker({ user, dark, setDark, th }) {
   const [recFor, setRecFor] = useState(null);
   const [mychars, setMychars] = useState([]);
   const [fc, setFc] = useState([]);
+  const [dupe, setDupe] = useState(null);
+  const [menu, setMenu] = useState(false);
   const dragIdx = useRef(null);
   const fileRef = useRef();
+  const toastTimer = useRef();
   const load = async () => {
     const { data } = await sb
       .from("series")
@@ -82,17 +92,31 @@ export default function Tracker({ user, dark, setDark, th }) {
   }, []);
   const say = (m) => {
     setToast(m);
-    setTimeout(() => setToast(""), 2500);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
   };
+  useEffect(() => {
+    const onNotice = (event) => {
+      say(event.detail?.message || "AniList did not respond. Try again.");
+    };
+    window.addEventListener("anilist:notice", onNotice);
+    return () => window.removeEventListener("anilist:notice", onNotice);
+  }, []);
   const save = async (s, chs0 = []) => {
     const { id, created_at, user_id, ...r0 } = s;
     let rest = r0;
     let chs = chs0;
-    if (!rest.synopsis || !(rest.genres || []).length) {
+    if (needsEnrichment(rest)) {
       say("Filling in details…");
       const e = await enrich(rest);
       rest = e.row;
-      if (!chs.length && !id) chs = e.chars;
+    }
+    if (!id) {
+      const dup = await findExistingSeries(user.id, rest, items);
+      if (dup) {
+        setDupe([dup]);
+        return;
+      }
     }
     const r = id
       ? await sb.from("series").update(rest).eq("id", id).select().single()
@@ -104,28 +128,64 @@ export default function Tracker({ user, dark, setDark, th }) {
           })
           .select()
           .single();
-    if (r.error) return alert(r.error.message);
-    const sid = r.data.id;
-    await sb.from("series_characters").delete().eq("series_id", sid);
-    if (chs.length) {
-      const ce = await sb.from("series_characters").insert(
-        chs.map((c, k) => ({
-          series_id: sid,
-          name: c.name,
-          image_url: c.image_url || null,
-          comment: c.comment || null,
-          position: k
-        }))
+    if (r.error) {
+      if (!id && isUniqueViolation(r.error)) {
+        const dup = await findExistingSeries(user.id, rest, []);
+        if (dup) {
+          setDupe([dup]);
+          return;
+        }
+      }
+      console.error("Saving series failed:", r.error);
+      say(
+        id
+          ? "Could not save those changes. Please try again."
+          : "Could not add that series. Please try again."
       );
-      if (ce.error) alert("Saved, but characters failed: " + ce.error.message);
+      return;
+    }
+
+    const sid = r.data.id;
+    const origChars = id ? mychars.filter((c) => c.series_id === id) : [];
+    let charNote = "";
+    if (chs.length > 0 && !sameChars(origChars, chs)) {
+      try {
+        if (id && origChars.length > 0) {
+          const de = await sb
+            .from("series_characters")
+            .delete()
+            .eq("series_id", sid);
+          if (de.error) throw de.error;
+        }
+        const ce = await sb.from("series_characters").insert(
+          chs.map((c, k) => ({
+            user_id: user.id,
+            series_id: sid,
+            name: c.name,
+            image_url: c.image_url || null,
+            comment: c.comment || null,
+            position: k
+          }))
+        );
+        if (ce.error) {
+          console.error("Saving characters failed:", ce.error);
+          charNote = "Series saved. Characters could not be updated this time.";
+        }
+      } catch (err) {
+        console.error("Saving characters failed:", err);
+        charNote = "Series saved. Characters could not be updated this time.";
+      }
     }
     setOpen(null);
-    load();
-    say(id ? "Saved" : "Added");
+    await load();
+    say(charNote || (id ? "Saved" : "Added"));
   };
   const saveProf = async (p) => {
     const { error } = await sb.from("profiles").upsert({ user_id: user.id, ...p });
-    if (error) return alert(error.message);
+    if (error) {
+      console.error("Saving profile failed:", error);
+      return say("Could not save your profile. Please try again.");
+    }
     setProf((x) => ({ ...x, ...p }));
     setPP(false);
     say("Profile saved");
@@ -228,8 +288,9 @@ export default function Tracker({ user, dark, setDark, th }) {
     const { error } = await sb
       .from("recommendations")
       .insert({ to_user: uid, series_id: recFor.id });
-    if (error && error.code !== "23505") {
-      alert(error.message);
+    if (error && !isUniqueViolation(error)) {
+      console.error("Sending recommendation failed:", error);
+      say("Could not send that recommendation. Please try again.");
       return false;
     }
     return true;
@@ -237,19 +298,24 @@ export default function Tracker({ user, dark, setDark, th }) {
   const addRec = async (r, name) => {
     say("Adding…");
     const x = r.series;
-    const { row, chars } = await enrich({
+    const row = {
       title: x.title,
       cover_url: x.cover_url,
       format: x.format,
-      genres: x.genres,
-      tags: x.tags,
-      warnings: x.warnings,
-      synopsis: x.synopsis,
+      genres: [...(x.genres || [])],
+      tags: [...(x.tags || [])],
+      warnings: x.warnings || "",
+      synopsis: x.synopsis || "",
       anilist_id: x.anilist_id,
       pub_status: x.pub_status,
       total_chapters: x.total_chapters,
       read_url: x.read_url
-    });
+    };
+    const dup = await findExistingSeries(user.id, row, items);
+    if (dup) {
+      setDupe([dup]);
+      return;
+    }
     const { data, error } = await sb
       .from("series")
       .insert({
@@ -260,21 +326,42 @@ export default function Tracker({ user, dark, setDark, th }) {
       })
       .select()
       .single();
-    if (error) return alert(error.message);
-    const src = fc.filter((c) => c.series_id === x.id);
-    const cs = src.length ? src : chars;
-    if (cs.length) {
-      await sb.from("series_characters").insert(
-        cs.map((c, k) => ({
-          series_id: data.id,
-          name: c.name,
-          image_url: c.image_url || null,
-          position: k
-        }))
-      );
+    if (error) {
+      if (isUniqueViolation(error)) {
+        const existing = await findExistingSeries(user.id, row, []);
+        if (existing) {
+          setDupe([existing]);
+          return;
+        }
+      }
+      console.error("Adding recommendation failed:", error);
+      say("Could not add that recommendation. Please try again.");
+      return;
     }
-    load();
-    say("Added to Want to Read");
+    const cs = fc.filter((c) => c.series_id === x.id);
+    let charNote = "";
+    if (cs.length) {
+      try {
+        const ce = await sb.from("series_characters").insert(
+          cs.map((c, k) => ({
+            user_id: user.id,
+            series_id: data.id,
+            name: c.name,
+            image_url: c.image_url || null,
+            position: k
+          }))
+        );
+        if (ce.error) {
+          console.error("Saving characters failed:", ce.error);
+          charNote = "Added to Want to Read. Characters could not be updated this time.";
+        }
+      } catch (err) {
+        console.error("Saving characters failed:", err);
+        charNote = "Added to Want to Read. Characters could not be updated this time.";
+      }
+    }
+    await load();
+    say(charNote || "Added to Want to Read");
   };
   const dismissRec = async (r) => {
     await sb.from("recommendations").delete().eq("id", r.id);
@@ -287,23 +374,42 @@ export default function Tracker({ user, dark, setDark, th }) {
     const { error } = await (a === "accept"
       ? sb.from("friendships").update({ status: "accepted" }).eq("id", r.id)
       : sb.from("friendships").delete().eq("id", r.id));
-    if (error) alert(error.message);
+    if (error) {
+      console.error("Updating friend request failed:", error);
+      say("Could not update that friend request. Please try again.");
+    }
     loadFriends();
   };
   const fAdd = async (txt) => {
     const m = txt.match(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
     );
-    if (!m) return alert("That does not look like a share link.");
+    if (!m) return say("That does not look like a share link.");
     const uid = m[0].toLowerCase();
-    if (uid === user.id) return alert("That is your own link.");
+    if (uid === user.id) return say("That is your own link.");
     const { error } = await addFriend(user.id, uid, frs);
-    if (error) return alert(error.message);
+    if (error) {
+      console.error("Sending friend request failed:", error);
+      return say("Could not send that friend request. Please try again.");
+    }
     say("Friend request sent");
     loadFriends();
   };
   const link = async (id) => {
-    await sb.from("profiles").upsert({ user_id: user.id, is_public: true });
+    if (!prof.is_public) {
+      const ok = confirm(
+        "Share links only work when your list is public. If you turn this on, anyone with the link can see your list, even without signing in. Turn it on and copy the link?"
+      );
+      if (!ok) return;
+      const { error } = await sb
+        .from("profiles")
+        .upsert({ user_id: user.id, is_public: true });
+      if (error) {
+        console.error("Making profile public failed:", error);
+        return say("Could not make your list public. Please try again.");
+      }
+      setProf((x) => ({ ...x, is_public: true }));
+    }
     const url =
       location.href.split("#")[0] + "#/share/" + user.id + (id ? "/" + id : "");
     await navigator.clipboard
@@ -344,22 +450,85 @@ export default function Tracker({ user, dark, setDark, th }) {
     try {
       xml = await readMalFile(file);
     } catch (err) {
-      return alert(
+      console.error("Reading the MAL file failed:", err);
+      return say(
         "Could not read that file. Try unzipping it first and choosing the .xml file inside."
       );
     }
     const { rows, anime } = malImport(xml, user.id);
     if (!rows.length) {
-      return alert(
+      return say(
         anime
           ? "That looks like your anime list. Please choose your manga list file instead (it has manga in its name)."
           : "No manga entries found. Make sure you chose the manga list export from MyAnimeList."
       );
     }
-    const { error } = await sb
+    say("Importing…");
+    const { data: fresh, error: readError } = await sb
       .from("series")
-      .insert(rows.map((r, i) => ({ ...r, position: items.length + i })));
-    error ? alert(error.message) : (say("Imported " + rows.length + " titles"), load());
+      .select("*")
+      .eq("user_id", user.id);
+    if (readError) console.error("Loading your list before import failed:", readError);
+    const have = [...(fresh || items)];
+    const skippedItems = [];
+    const add = [];
+    let skipped = 0;
+    let nextPos = Math.max(-1, ...items.map((i) => i.position)) + 1;
+    for (const r of rows) {
+      const dup = have.find((x) => same(x, r));
+      if (dup) {
+        skipped++;
+        if (dup.id && !skippedItems.some((x) => x.id === dup.id)) {
+          skippedItems.push(dup);
+        }
+        continue;
+      }
+      const row = { ...r, position: nextPos++ };
+      add.push(row);
+      have.push(row);
+    }
+
+    let imported = 0;
+    let failed = 0;
+    if (add.length) {
+      const { error } = await sb.from("series").insert(add);
+      if (!error) {
+        imported = add.length;
+      } else if (isUniqueViolation(error)) {
+        for (const row of add) {
+          const dup = await findExistingSeries(user.id, row, []);
+          if (dup) {
+            skipped++;
+            if (!skippedItems.some((x) => x.id === dup.id)) {
+              skippedItems.push(dup);
+            }
+            continue;
+          }
+          const { error: one } = await sb.from("series").insert(row);
+          if (!one) imported++;
+          else if (isUniqueViolation(one)) skipped++;
+          else {
+            failed++;
+            console.error("Importing a title failed:", one);
+          }
+        }
+      } else {
+        console.error("Importing the MAL list failed:", error);
+        return say("Could not import that file. Please try again.");
+      }
+    }
+    await load();
+    say(
+      "Imported " +
+        imported +
+        " · Skipped " +
+        skipped +
+        (skipped ? " already on your list" : "")
+    );
+    if (skippedItems.length) setDupe(skippedItems);
+    else if (!imported && failed) {
+      say("Could not import that file. Please try again.");
+    }
   };
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
@@ -371,6 +540,13 @@ export default function Tracker({ user, dark, setDark, th }) {
           </h1>
         </div>
         <div className="flex gap-2 flex-wrap justify-center sm:justify-end items-center">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xml,.gz,application/xml,text/xml,application/gzip"
+            hidden
+            onChange={onFile}
+          />
           <button
             onClick={() => setOpen({ ...blank, status: "want" })}
             className="rounded-full bg-plum text-white font-bold px-5 py-2 hover:brightness-110"
@@ -383,6 +559,36 @@ export default function Tracker({ user, dark, setDark, th }) {
           >
             Share my list
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setMenu((v) => !v)}
+              className="rounded-full bg-plum/15 font-bold px-4 py-2"
+              aria-expanded={menu}
+              aria-haspopup="menu"
+            >
+              ⋯ Menu
+            </button>
+            {menu && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setMenu(false)}
+                />
+                <div className="absolute right-0 z-40 mt-2 w-60 rounded-2xl bg-white dark:bg-[#221f33] shadow-xl p-2">
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(false);
+                      fileRef.current?.click();
+                    }}
+                    className="w-full text-left rounded-xl px-3 py-2 font-semibold hover:bg-plum/10"
+                  >
+                    ⬆ Import from MyAnimeList
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setFpanel(true)}
             className="rounded-full bg-plum/15 font-bold px-4 py-2"
@@ -485,6 +691,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       )}
       {open && (
         <Drawer
+          key={open.id || "new"}
           item={open}
           chars0={open.id ? mychars.filter((c) => c.series_id === open.id) : []}
           thoughts={thoughts(open)}
@@ -494,6 +701,7 @@ export default function Tracker({ user, dark, setDark, th }) {
           onDelete={del}
           onShare={(s) => link(s.id)}
           onRecommend={(s) => setRecFor(s)}
+          notify={say}
         />
       )}
       {recFor && (
@@ -527,8 +735,18 @@ export default function Tracker({ user, dark, setDark, th }) {
       {panel && (
         <ThemePanel th={th} dark={dark} setDark={setDark} onClose={() => setPanel(false)} />
       )}
+      {dupe && (
+        <AlreadyOnList
+          items={dupe}
+          onOpen={(s) => setOpen(s)}
+          onClose={() => setDupe(null)}
+        />
+      )}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full bg-ink text-white px-5 py-2 pop">
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-[80] -translate-x-1/2 max-w-[90vw] pointer-events-none rounded-full bg-ink text-white text-center px-5 py-2 pop"
+        >
           {toast}
         </div>
       )}
