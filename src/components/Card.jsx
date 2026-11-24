@@ -1,5 +1,6 @@
 import { isHttp, STAT } from "../lib/util";
 import Avatar from "./Avatar";
+import SpoilerText from "./SpoilerText";
 import Stars from "./Stars";
 
 export function FriendLine({ x, showName = true }) {
@@ -25,7 +26,9 @@ export function FriendLine({ x, showName = true }) {
           onClick={(e) => e.stopPropagation()}
         >
           <summary className="cursor-pointer font-bold">Review</summary>
-          <p className="mt-1 break-words whitespace-pre-line">{x.review}</p>
+          <p className="mt-1 break-words whitespace-pre-line">
+            <SpoilerText text={x.review} />
+          </p>
         </details>
       )}
       {x.notes && (
@@ -146,7 +149,9 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             <summary className="cursor-pointer font-bold text-plum">
               My review
             </summary>
-            <p className="mt-1 break-words whitespace-pre-line">{s.review}</p>
+            <p className="mt-1 break-words whitespace-pre-line">
+              <SpoilerText text={s.review} />
+            </p>
           </details>
         )}
         {s.notes && (

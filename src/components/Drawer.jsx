@@ -22,6 +22,7 @@ import Avatar from "./Avatar";
 import CharSection from "./CharSection";
 import ChipPicker from "./ChipPicker";
 import { FriendLine } from "./Card";
+import SpoilerText from "./SpoilerText";
 import Stars from "./Stars";
 
 const L = ({ t, children }) => (
@@ -662,15 +663,47 @@ export default function Drawer({
               onChange={(e) => set("rating", e.target.value)}
             />
           </L>
-          <L t="Review">
-            <Auto
-              className="inp"
-              rows={4}
-              disabled={readOnly || !fin}
-              value={f.review || ""}
-              onChange={(e) => set("review", e.target.value)}
-            />
-          </L>
+          {readOnly ? (
+            <div className="block">
+              <span className="text-sm font-semibold opacity-70">Review</span>
+              {f.review ? (
+                <p className="mt-1 break-words whitespace-pre-line">
+                  <SpoilerText text={f.review} />
+                </p>
+              ) : (
+                <p className="mt-1 text-sm opacity-60">No review yet.</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <L t="Review">
+                <Auto
+                  className="inp"
+                  rows={4}
+                  disabled={!fin}
+                  value={f.review || ""}
+                  onChange={(e) => set("review", e.target.value)}
+                />
+              </L>
+              <p className="text-xs opacity-60">
+                Put spoilers in [square brackets]
+              </p>
+              <div className="rounded-xl bg-plum/10 p-3 text-sm">
+                <p className="text-[11px] font-bold uppercase tracking-wide opacity-60">
+                  Live preview
+                </p>
+                <p className="mt-1 break-words whitespace-pre-line">
+                  {f.review ? (
+                    <SpoilerText text={f.review} />
+                  ) : (
+                    <span className="opacity-60">
+                      Your review preview will appear here.
+                    </span>
+                  )}
+                </p>
+              </div>
+            </>
+          )}
         </div>
         {readOnly && onAdd && !(fr && fr.length) && (
           <button

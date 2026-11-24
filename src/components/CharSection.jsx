@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { anilistAllChars, searchAniList } from "../lib/anilist";
 import { norm } from "../lib/util";
+import SpoilerText from "./SpoilerText";
 
 export default function CharSection({
   chars,
@@ -160,7 +161,7 @@ export default function CharSection({
             {readOnly ? (
               c.comment && (
                 <p className="text-xs opacity-80 whitespace-pre-line text-left">
-                  {c.comment}
+                  <SpoilerText text={c.comment} />
                 </p>
               )
             ) : (
@@ -177,7 +178,8 @@ export default function CharSection({
                 key={k}
                 className="text-xs text-left rounded-lg bg-plum/10 p-1.5 whitespace-pre-line"
               >
-                <b className="text-plum">{t.name}:</b> {t.comment}
+                <b className="text-plum">{t.name}:</b>{" "}
+                <SpoilerText text={t.comment} />
               </p>
             ))}
           </div>
