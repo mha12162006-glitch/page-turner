@@ -22,12 +22,6 @@ export default function Filters({ f, setF, items }) {
   );
   return (
     <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2 sm:items-center">
-      <input
-        className="inp col-span-2 sm:!w-48"
-        placeholder="Search my list"
-        value={f.q}
-        onChange={(e) => setF({ ...f, q: e.target.value })}
-      />
       <S k="format" label="Category" opts={FORMATS} />
       <S k="tag" label="Trope" opts={uniq("tags")} />
       <S k="source" label="Source" opts={uniq("source")} />

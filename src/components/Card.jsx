@@ -41,6 +41,7 @@ export function FriendLine({ x, showName = true }) {
 }
 
 export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
+  const mine = (fr || []).find((x) => x.isMe === true);
   return (
     <article
       draggable={!readOnly && !!drag}
@@ -74,6 +75,15 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
         {s.priority && (
           <span className="absolute top-2 right-2 rounded-full bg-amber-400 text-black text-xs font-bold px-2 py-0.5">
             ★ Top pick
+          </span>
+        )}
+        {!readOnly && s.is_hidden && (
+          <span
+            className="absolute bottom-2 left-2 rounded-full bg-black/70 px-2 py-0.5 text-xs font-bold text-white"
+            aria-label="Hidden from friends"
+            title="Hidden from friends"
+          >
+            🔒 Hidden
           </span>
         )}
       </div>
@@ -114,7 +124,11 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             Read ↗
           </a>
         )}
-        {onAdd && !(fr && fr.length) && (
+        {mine ? (
+          <p className="mt-2 text-xs font-bold text-plum">
+            ✓ On your list as {STAT[mine.status] || "on your list"}
+          </p>
+        ) : onAdd ? (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -122,9 +136,9 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             }}
             className="mt-2 w-full rounded-full bg-plum text-white text-xs font-bold py-1.5"
           >
-            + Want to Read
+            + Add to my list
           </button>
-        )}
+        ) : null}
         <div className="mt-1 flex items-center justify-between">
           <Stars v={s.excitement} size="text-sm" />
           {["done", "hiatus", "dropped"].includes(s.status) &&

@@ -11,7 +11,9 @@ import {
   norm,
   num,
   PUB,
-  STATUS
+  same,
+  STATUS,
+  statusLabel
 } from "../lib/util";
 import {
   joinWarnings,
@@ -96,16 +98,23 @@ export default function Drawer({
   onShare,
   onRecommend,
   onAdd,
+  onOpenMine,
   readOnly,
+  friend,
+  friendView,
+  mine,
+  recommendations,
   fr,
   chars0,
   thoughts,
   notify
 }) {
   const isNew = !item.id;
+  const mineEntry = (mine || []).find((row) => same(row, item));
   const [f, setF] = useState(() => ({
     ...blank,
     ...item,
+    is_hidden: !!item.is_hidden,
     genres: joinTags(item.genres),
     tags: joinTags(item.tags),
     warnings: joinWarnings(item.warnings),
@@ -259,10 +268,15 @@ export default function Drawer({
         className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl font-extrabold">
-            {readOnly ? f.title : isNew ? "Add new series" : "Edit series"}
-          </h2>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-extrabold">
+              {readOnly ? f.title : isNew ? "Add new series" : "Edit series"}
+            </h2>
+            {readOnly && friendView && friend?.name && (
+              <p className="text-sm opacity-70">From {friend.name}’s list</p>
+            )}
+          </div>
           <button onClick={onClose} className="text-2xl px-2" aria-label="Close">
             ×
           </button>
@@ -370,6 +384,36 @@ export default function Drawer({
             </button>
           ))}
         </div>
+        {!readOnly && (
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-plum/10 p-3">
+            <div>
+              <p className="font-bold">🔒 Hide from friends</p>
+              <p className="text-xs opacity-70">
+                Hidden titles stay on your list but never appear in friends’
+                search, your friend profile, recommendations or public share
+                links.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!f.is_hidden}
+              aria-label="Hide from friends"
+              onClick={() => set("is_hidden", !f.is_hidden)}
+              className={
+                "relative h-6 w-11 shrink-0 rounded-full transition " +
+                (f.is_hidden ? "bg-plum" : "bg-plum/25")
+              }
+            >
+              <span
+                className={
+                  "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition " +
+                  (f.is_hidden ? "translate-x-5" : "")
+                }
+              />
+            </button>
+          </div>
+        )}
         {["reading", "hiatus", "dropped", "done"].includes(f.status) && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -630,6 +674,30 @@ export default function Drawer({
             ))}
           </div>
         )}
+        {readOnly && recommendations && recommendations.length > 0 && (
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
+            <p className="font-bold">💌 Translator recommendation</p>
+            <p className="text-sm">
+              {friend?.name || "This friend"} recommended this series to you.
+            </p>
+          </div>
+        )}
+        {readOnly && friendView && f.source && (
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
+            <p className="font-bold">🔎 Found via</p>
+            <p className="text-sm break-words whitespace-pre-line">
+              {f.source}
+            </p>
+          </div>
+        )}
+        {readOnly && friendView && f.notes && (
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
+            <p className="font-bold">📝 Footnote</p>
+            <p className="text-sm break-words whitespace-pre-line">
+              {f.notes}
+            </p>
+          </div>
+        )}
         {!readOnly && (
           <L t="Personal notes / footnotes">
             <Auto
@@ -705,12 +773,27 @@ export default function Drawer({
             </>
           )}
         </div>
-        {readOnly && onAdd && !(fr && fr.length) && (
+        {readOnly && mineEntry && (
+          <div className="sticky bottom-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-plum/15 p-3 shadow-lg">
+            <p className="font-bold">
+              On your list as {statusLabel(mineEntry.status)}
+            </p>
+            {onOpenMine && (
+              <button
+                onClick={() => onOpenMine(mineEntry)}
+                className="rounded-full bg-plum text-white font-bold px-4 py-1.5"
+              >
+                Open it
+              </button>
+            )}
+          </div>
+        )}
+        {readOnly && !mineEntry && onAdd && (
           <button
             onClick={() => onAdd(item)}
             className="sticky bottom-3 w-full rounded-xl bg-plum text-white font-bold py-2.5 shadow-lg"
           >
-            + Add to my Want to Read
+            + Add to my list
           </button>
         )}
         {!readOnly && (

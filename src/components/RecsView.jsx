@@ -15,6 +15,7 @@ export default function RecsView({ recs, fp, items, onAdd, onDismiss }) {
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {recs.map((r) => {
         const s = r.series;
+        if (!s || s.is_hidden) return null;
         const pr = fp[r.from_user] || {};
         const name = pr.display_name || "A friend";
         const have = items.some((i) => same(i, s));

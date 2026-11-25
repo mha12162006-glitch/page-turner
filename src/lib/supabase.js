@@ -22,6 +22,34 @@ export const isUniqueViolation = (error) =>
   error?.code === "23505" ||
   /duplicate key|unique constraint|already exists/i.test(error?.message || "");
 
+/**
+ * Public share pages only need these columns. Keeping the list explicit means
+ * private fields such as notes, source and moodboard are never fetched.
+ */
+export const SHARED_SERIES_COLUMNS = [
+  "id",
+  "user_id",
+  "title",
+  "cover_url",
+  "format",
+  "genres",
+  "synopsis",
+  "status",
+  "excitement",
+  "priority",
+  "tags",
+  "warnings",
+  "rating",
+  "review",
+  "position",
+  "anilist_id",
+  "created_at",
+  "pub_status",
+  "chapter",
+  "total_chapters",
+  "read_url"
+].join(",");
+
 export async function findExistingSeries(userId, candidate, known = []) {
   const local = (known || []).find((x) => same(x, candidate));
   if (local) return local;

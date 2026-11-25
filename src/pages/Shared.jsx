@@ -3,9 +3,12 @@ import {
   addFriend,
   findExistingSeries,
   isUniqueViolation,
-  sb
+  sb,
+  SHARED_SERIES_COLUMNS
 } from "../lib/supabase";
-import { relWith, same, STATUS } from "../lib/util";
+import { relWith, same, STATUS, statusLabel } from "../lib/util";
+import { latestPerSeries, seriesKey } from "../lib/search";
+import AddFromFriend from "../components/AddFromFriend";
 import AlreadyOnList from "../components/AlreadyOnList";
 import Avatar from "../components/Avatar";
 import Card from "../components/Card";
@@ -19,6 +22,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
   const [mine, setMine] = useState([]);
   const [chs, setChs] = useState([]);
   const [dupe, setDupe] = useState(null);
+  const [addFor, setAddFor] = useState(null);
   const [toast, setToast] = useState("");
   const toastTimer = useRef();
   const say = (m) => {
@@ -33,35 +37,62 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
     window.addEventListener("anilist:notice", onNotice);
     return () => window.removeEventListener("anilist:notice", onNotice);
   }, []);
-  const loadAll = () => {
+  const loadAll = async () => {
     sb.from("profiles")
       .select("display_name,avatar_url,bio")
       .eq("user_id", uid)
       .maybeSingle()
       .then(({ data }) => setWho(data || {}));
-    let q = sb.from("series").select("*").eq("user_id", uid).order("position");
-    if (sid) q = q.eq("id", sid);
-    q.then(({ data }) => setItems(data || []));
-    sb.from("series_characters")
-      .select("*")
+    let q = sb
+      .from("series")
+      .select(SHARED_SERIES_COLUMNS)
       .eq("user_id", uid)
-      .order("position")
-      .then(({ data }) => setChs(data || []));
+      .eq("is_hidden", false)
+      .order("position");
+    if (sid) q = q.eq("id", sid);
+    const [seriesResult, charsResult] = await Promise.all([
+      q,
+      sb
+        .from("series_characters")
+        .select("id,user_id,series_id,name,image_url,comment,position")
+        .eq("user_id", uid)
+        .order("position")
+    ]);
+    const allRows = seriesResult.data || [];
+    const list = latestPerSeries(allRows);
+    setItems(list);
+    const visibleKeys = new Set(list.map(seriesKey));
+    const keyById = new Map(allRows.map((row) => [row.id, seriesKey(row)]));
+    setChs(
+      (charsResult.data || []).filter((row) =>
+        visibleKeys.has(keyById.get(row.series_id))
+      )
+    );
   };
   const loadRel = async () => {
     if (!me) return;
     const [a, b] = await Promise.all([
       sb.from("friendships").select("*"),
-      sb.from("series").select("*").eq("user_id", me.id)
+      sb
+        .from("series")
+        .select(SHARED_SERIES_COLUMNS)
+        .eq("user_id", me.id)
     ]);
     setRows(a.data || []);
     setMine(b.data || []);
   };
   useEffect(() => {
+    setItems(null);
+    setWho({});
+    setRows([]);
+    setMine([]);
+    setChs([]);
+    setOpen(null);
+    setAddFor(null);
+    setDupe(null);
     loadAll();
     loadRel();
-  }, [me?.id]);
-  const clean = (s) => ({ ...s, notes: null, source: null, media: [] });
+  }, [uid, sid, me?.id]);
   const rel = me ? relWith(rows, me.id, uid) : null;
   const doAdd = async () => {
     const { error } = await addFriend(me.id, uid, rows);
@@ -74,10 +105,11 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
   };
   const youHave = (x) =>
     me && me.id !== uid
-      ? mine
+      ? latestPerSeries(mine)
           .filter((y) => same(x, y))
           .map((y) => ({
             name: "You",
+            isMe: true,
             status: y.status,
             rating: y.rating,
             review: y.review,
@@ -88,30 +120,46 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           }))
       : [];
   const canAdd = !!me && me.id !== uid;
-  const addWant = async (x) => {
+  const openMine = (series) => {
+    if (series?.id) {
+      try {
+        sessionStorage.setItem("mt-open-series", series.id);
+      } catch (err) {
+        // Private browsing can block storage; the home page still opens.
+      }
+    }
+    setOpen(null);
+    setAddFor(null);
+    setDupe(null);
+    location.hash = "#/";
+  };
+  const addFromFriend = async (x, { status, chapter } = {}) => {
+    if (!me || !x) return false;
     const row = {
       title: x.title,
-      cover_url: x.cover_url,
-      format: x.format,
+      cover_url: x.cover_url || null,
+      format: x.format || "Manhwa",
       genres: [...(x.genres || [])],
       tags: [...(x.tags || [])],
       warnings: x.warnings || "",
       synopsis: x.synopsis || "",
-      anilist_id: x.anilist_id,
-      pub_status: x.pub_status,
-      total_chapters: x.total_chapters,
-      read_url: x.read_url
+      anilist_id: x.anilist_id ?? null,
+      pub_status: x.pub_status || "",
+      total_chapters: x.total_chapters ?? null,
+      read_url: x.read_url || null
     };
     const dup = await findExistingSeries(me.id, row, mine);
     if (dup) {
+      setAddFor(null);
       setDupe([dup]);
-      return;
+      return false;
     }
     const { data, error } = await sb
       .from("series")
       .insert({
         ...row,
-        status: "want",
+        status: status || "want",
+        chapter: chapter == null ? null : chapter,
         source: "From " + (who.display_name || "a friend") + " list",
         position: mine.reduce((m, i) => Math.max(m, i.position), -1) + 1
       })
@@ -121,13 +169,14 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       if (isUniqueViolation(error)) {
         const existing = await findExistingSeries(me.id, row, []);
         if (existing) {
+          setAddFor(null);
           setDupe([existing]);
-          return;
+          return false;
         }
       }
       console.error("Adding from a friend failed:", error);
       say("Could not add that series. Please try again.");
-      return;
+      return false;
     }
     const cs = chs.filter((c) => c.series_id === x.id);
     let charNote = "";
@@ -144,16 +193,18 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
         );
         if (ce.error) {
           console.error("Saving characters failed:", ce.error);
-          charNote = "Added to your Want to Read. Characters could not be updated this time.";
+          charNote = "Characters could not be copied this time.";
         }
       } catch (err) {
         console.error("Saving characters failed:", err);
-        charNote = "Added to your Want to Read. Characters could not be updated this time.";
+        charNote = "Characters could not be copied this time.";
       }
     }
     await loadRel();
     setOpen(null);
-    say(charNote || "Added to your Want to Read.");
+    setAddFor(null);
+    say(charNote || "Added to " + statusLabel(status || "want") + ".");
+    return true;
   };
   const pill = "rounded-full bg-plum/15 font-bold px-4 py-2";
   const friendBtn =
@@ -219,8 +270,8 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
                       s={s}
                       readOnly
                       fr={youHave(s)}
-                      onAdd={canAdd ? addWant : undefined}
-                      onOpen={(x) => setOpen(clean(x))}
+                      onAdd={canAdd ? (x) => setAddFor(x) : undefined}
+                      onOpen={(x) => setOpen(x)}
                     />
                   ))}
                 </div>
@@ -234,11 +285,25 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           key={open.id || "new"}
           item={open}
           readOnly
+          friend={who}
+          friendView={!!me && me.id !== uid}
+          mine={mine}
           fr={youHave(open)}
           chars0={chs.filter((c) => c.series_id === open.id)}
-          onAdd={canAdd ? addWant : undefined}
+          onAdd={canAdd ? (x) => setAddFor(x) : undefined}
+          onOpenMine={openMine}
           onClose={() => setOpen(null)}
           notify={say}
+        />
+      )}
+      {addFor && (
+        <AddFromFriend
+          source={addFor}
+          mine={mine}
+          friendName={who.display_name || "a friend"}
+          onAdd={(choice) => addFromFriend(addFor, choice)}
+          onOpen={openMine}
+          onClose={() => setAddFor(null)}
         />
       )}
       <p className="text-sm opacity-60">
@@ -249,7 +314,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       {dupe && (
         <AlreadyOnList
           items={dupe}
-          onOpen={(s) => setOpen(s)}
+          onOpen={openMine}
           onClose={() => setDupe(null)}
         />
       )}

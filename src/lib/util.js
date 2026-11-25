@@ -44,10 +44,11 @@ export const blank = {
   pub_status: "",
   chapter: null,
   total_chapters: null,
-  read_url: ""
+  read_url: "",
+  is_hidden: false
 };
 
-export const emptyF = { q: "", format: "", tag: "", source: "", top: false };
+export const emptyF = { format: "", tag: "", source: "", top: false };
 
 export const norm = (t) => (t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -100,7 +101,6 @@ export const isImg = (u) =>
 export const applyF = (items, f) =>
   items.filter(
     (i) =>
-      (!f.q || i.title.toLowerCase().includes(f.q.toLowerCase())) &&
       (!f.format || i.format === f.format) &&
       (!f.tag || (i.tags || []).includes(f.tag)) &&
       (!f.source || i.source === f.source) &&

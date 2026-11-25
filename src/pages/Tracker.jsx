@@ -16,14 +16,24 @@ import {
   same,
   sameChars,
   STATUS,
+  statusLabel,
   TABS
 } from "../lib/util";
+import {
+  friendsWhoHave,
+  searchGroups,
+  seriesKey,
+  visibleFriendSeries
+} from "../lib/search";
+import AddFromFriend from "../components/AddFromFriend";
 import AlreadyOnList from "../components/AlreadyOnList";
 import Avatar from "../components/Avatar";
 import Card from "../components/Card";
 import Drawer from "../components/Drawer";
 import Filters from "../components/Filters";
 import FriendsPanel from "../components/FriendsPanel";
+import FriendsView from "../components/FriendsView";
+import GlobalSearch from "../components/GlobalSearch";
 import Logo from "../components/Logo";
 import ProfilePanel from "../components/ProfilePanel";
 import RecModal from "../components/RecModal";
@@ -49,6 +59,11 @@ export default function Tracker({ user, dark, setDark, th }) {
   const [fc, setFc] = useState([]);
   const [dupe, setDupe] = useState(null);
   const [menu, setMenu] = useState(false);
+  const [gq, setGq] = useState("");
+  const [gscope, setGscope] = useState("all");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [friendOpen, setFriendOpen] = useState(null);
+  const [addFor, setAddFor] = useState(null);
   const dragIdx = useRef(null);
   const fileRef = useRef();
   const toastTimer = useRef();
@@ -102,6 +117,25 @@ export default function Tracker({ user, dark, setDark, th }) {
     window.addEventListener("anilist:notice", onNotice);
     return () => window.removeEventListener("anilist:notice", onNotice);
   }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(gq.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [gq]);
+  useEffect(() => {
+    if (!items.length) return;
+    let id = "";
+    try {
+      id = sessionStorage.getItem("mt-open-series") || "";
+    } catch (err) {
+      return;
+    }
+    if (!id) return;
+    const row = items.find((x) => x.id === id);
+    try {
+      sessionStorage.removeItem("mt-open-series");
+    } catch (err) {}
+    if (row) setOpen(row);
+  }, [items]);
   const save = async (s, chs0 = []) => {
     const { id, created_at, user_id, ...r0 } = s;
     let rest = r0;
@@ -205,6 +239,7 @@ export default function Tracker({ user, dark, setDark, th }) {
     if (!ids.length) {
       setFp({});
       setFs([]);
+      setFc([]);
       return;
     }
     const [a, b, c] = await Promise.all([
@@ -214,9 +249,11 @@ export default function Tracker({ user, dark, setDark, th }) {
         ? sb.from("series_characters").select("*").in("user_id", acc)
         : { data: [] }
     ]);
+    const visibleRows = visibleFriendSeries(b.data || []);
+    const visibleIds = new Set(visibleRows.map((row) => row.id));
     setFp(Object.fromEntries((a.data || []).map((x) => [x.user_id, x])));
-    setFs(b.data || []);
-    setFc(c.data || []);
+    setFs(visibleRows);
+    setFc((c.data || []).filter((row) => visibleIds.has(row.series_id)));
   };
   useEffect(() => {
     loadFriends();
@@ -224,24 +261,23 @@ export default function Tracker({ user, dark, setDark, th }) {
       .channel("fr-" + user.id)
       .on("postgres_changes", { event: "*", schema: "public", table: "friendships" }, loadFriends)
       .subscribe();
-    return () => sb.removeChannel(ch);
+    const seriesCh = sb
+      .channel("fr-series-" + user.id)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "series" },
+        loadFriends
+      )
+      .subscribe();
+    return () => {
+      sb.removeChannel(ch);
+      sb.removeChannel(seriesCh);
+    };
   }, []);
-  const friendHas = (x) =>
-    fs
-      .filter((y) => same(x, y))
-      .map((y) => ({
-        name: fp[y.user_id]?.display_name || "A friend",
-        avatar: fp[y.user_id]?.avatar_url,
-        status: y.status,
-        rating: y.rating,
-        review: y.review,
-        notes: y.notes,
-        priority: y.priority,
-        chapter: y.chapter,
-        total: y.total_chapters
-      }));
+  const liveFs = useMemo(() => visibleFriendSeries(fs), [fs]);
+  const friendHas = (x) => friendsWhoHave(x, liveFs, fp);
   const thoughts = (sr) => (c) => {
-    const ids = fs.filter((y) => same(sr, y)).map((y) => y.id);
+    const ids = liveFs.filter((y) => same(sr, y)).map((y) => y.id);
     return fc
       .filter(
         (x) =>
@@ -254,13 +290,81 @@ export default function Tracker({ user, dark, setDark, th }) {
         comment: x.comment
       }));
   };
+  const thoughtsForFriend = (sr, ownerUid) => (c) => {
+    const ids = liveFs
+      .filter((y) => y.user_id !== ownerUid && same(sr, y))
+      .map((y) => y.id);
+    const fromFriends = fc
+      .filter(
+        (x) =>
+          ids.includes(x.series_id) &&
+          x.comment &&
+          norm(x.name) === norm(c.name)
+      )
+      .map((x) => ({
+        name: fp[x.user_id]?.display_name || "A friend",
+        comment: x.comment
+      }));
+    const myIds = items.filter((y) => same(sr, y)).map((y) => y.id);
+    const fromMe = mychars
+      .filter(
+        (x) =>
+          myIds.includes(x.series_id) &&
+          x.comment &&
+          norm(x.name) === norm(c.name)
+      )
+      .map((x) => ({ name: "You", comment: x.comment }));
+    return [...fromFriends, ...fromMe];
+  };
+  const whoElseHas = (x, excludeUid) => {
+    const out = [];
+    const own = items.find((row) => same(x, row));
+    if (own) {
+      out.push({
+        name: "You",
+        isMe: true,
+        status: own.status,
+        rating: own.rating,
+        review: own.review,
+        notes: own.notes,
+        priority: own.priority,
+        chapter: own.chapter,
+        total: own.total_chapters
+      });
+    }
+    for (const row of liveFs) {
+      if (row.user_id === excludeUid || !same(x, row)) continue;
+      out.push({
+        name: fp[row.user_id]?.display_name || "A friend",
+        isMe: false,
+        avatar: fp[row.user_id]?.avatar_url,
+        status: row.status,
+        rating: row.rating,
+        review: row.review,
+        notes: row.notes,
+        priority: row.priority,
+        chapter: row.chapter,
+        total: row.total_chapters
+      });
+    }
+    return out;
+  };
   const loadRecs = async () => {
     const { data } = await sb
       .from("recommendations")
       .select("*, series(*)")
       .eq("to_user", user.id)
       .order("created_at", { ascending: false });
-    setRecs((data || []).filter((r) => r.series));
+    const seen = new Set();
+    const next = [];
+    for (const row of data || []) {
+      if (!row.series || row.series.is_hidden) continue;
+      const key = (row.from_user || "") + "|" + seriesKey(row.series);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      next.push(row);
+    }
+    setRecs(next);
   };
   useEffect(() => {
     loadRecs();
@@ -274,16 +378,24 @@ export default function Tracker({ user, dark, setDark, th }) {
       .subscribe();
     return () => sb.removeChannel(ch);
   }, []);
-  const friendList = frs
-    .filter((r) => r.status === "accepted")
-    .map((r) => {
-      const uid = r.requester === user.id ? r.addressee : r.requester;
-      return {
-        uid,
-        name: fp[uid]?.display_name || "Friend",
-        avatar: fp[uid]?.avatar_url
-      };
-    });
+  const friendList = (() => {
+    const seen = new Set();
+    return frs
+      .filter((r) => r.status === "accepted")
+      .map((r) => {
+        const uid = r.requester === user.id ? r.addressee : r.requester;
+        return {
+          uid,
+          name: fp[uid]?.display_name || "Friend",
+          avatar: fp[uid]?.avatar_url
+        };
+      })
+      .filter((friend) => {
+        if (seen.has(friend.uid)) return false;
+        seen.add(friend.uid);
+        return true;
+      });
+  })();
   const sendRec = async (uid) => {
     const { error } = await sb
       .from("recommendations")
@@ -363,6 +475,84 @@ export default function Tracker({ user, dark, setDark, th }) {
     await load();
     say(charNote || "Added to Want to Read");
   };
+  const addFromFriend = async (source, friend, { status, chapter } = {}) => {
+    if (!source || !friend) return false;
+    const row = {
+      title: source.title,
+      cover_url: source.cover_url || null,
+      format: source.format || "Manhwa",
+      genres: [...(source.genres || [])],
+      tags: [...(source.tags || [])],
+      warnings: source.warnings || "",
+      synopsis: source.synopsis || "",
+      anilist_id: source.anilist_id ?? null,
+      pub_status: source.pub_status || "",
+      total_chapters: source.total_chapters ?? null,
+      read_url: source.read_url || null
+    };
+    const dup = await findExistingSeries(user.id, row, items);
+    if (dup) {
+      setAddFor(null);
+      setFriendOpen(null);
+      setDupe([dup]);
+      return false;
+    }
+    const { data, error } = await sb
+      .from("series")
+      .insert({
+        ...row,
+        status: status || "want",
+        chapter: chapter == null ? null : chapter,
+        source: "From " + (friend.name || "a friend") + " list",
+        position: Math.max(-1, ...items.map((i) => i.position)) + 1
+      })
+      .select()
+      .single();
+    if (error) {
+      if (isUniqueViolation(error)) {
+        const existing = await findExistingSeries(user.id, row, []);
+        if (existing) {
+          setAddFor(null);
+          setFriendOpen(null);
+          setDupe([existing]);
+          return false;
+        }
+      }
+      console.error("Adding from a friend failed:", error);
+      say("Could not add that series. Please try again.");
+      return false;
+    }
+    const sourceIds = liveFs
+      .filter((row) => row.user_id === friend.uid && same(row, source))
+      .map((row) => row.id);
+    const cs = fc.filter((c) => sourceIds.includes(c.series_id));
+    let charNote = "";
+    if (cs.length) {
+      try {
+        const ce = await sb.from("series_characters").insert(
+          cs.map((c, k) => ({
+            user_id: user.id,
+            series_id: data.id,
+            name: c.name,
+            image_url: c.image_url || null,
+            position: k
+          }))
+        );
+        if (ce.error) {
+          console.error("Saving characters failed:", ce.error);
+          charNote = "Characters could not be copied this time.";
+        }
+      } catch (err) {
+        console.error("Saving characters failed:", err);
+        charNote = "Characters could not be copied this time.";
+      }
+    }
+    await load();
+    setAddFor(null);
+    setFriendOpen(null);
+    say(charNote || "Added to " + statusLabel(status || "want"));
+    return true;
+  };
   const dismissRec = async (r) => {
     await sb.from("recommendations").delete().eq("id", r.id);
     loadRecs();
@@ -421,6 +611,27 @@ export default function Tracker({ user, dark, setDark, th }) {
     () => applyF(items.filter((i) => (tab === "active" ? i.status !== "done" : i.status === tab)), f),
     [items, tab, f]
   );
+  const searchResults = useMemo(
+    () =>
+      searchGroups({
+        q: debouncedQ,
+        scope: gscope,
+        mine: items,
+        friends: fs,
+        profiles: fp
+      }),
+    [debouncedQ, gscope, items, fs, fp]
+  );
+  const searchOpen = gq.trim().length > 0;
+  const searchPending = gq.trim() !== debouncedQ;
+  const friendLive = friendOpen
+    ? liveFs.find((row) => row.id === friendOpen.series.id) ||
+      liveFs.find(
+        (row) =>
+          row.user_id === friendOpen.friend.uid &&
+          same(row, friendOpen.series)
+      )
+    : null;
   const canDrag = f === emptyF || JSON.stringify(f) === JSON.stringify(emptyF);
   const drop = async (to) => {
     const from = dragIdx.current;
@@ -593,7 +804,7 @@ export default function Tracker({ user, dark, setDark, th }) {
             onClick={() => setFpanel(true)}
             className="rounded-full bg-plum/15 font-bold px-4 py-2"
           >
-            👥 Friends
+            👥 Requests
             {incoming > 0 && (
               <span className="ml-1.5 rounded-full bg-rose-500 text-white text-xs px-1.5 py-0.5">
                 {incoming}
@@ -629,7 +840,10 @@ export default function Tracker({ user, dark, setDark, th }) {
         {TABS.map(([k, l]) => (
           <button
             key={k}
-            onClick={() => setTab(k)}
+            onClick={() => {
+              setTab(k);
+              setGq("");
+            }}
             className={
               "rounded-full px-3 sm:px-5 py-1.5 sm:py-2 text-sm sm:text-base font-bold transition " +
               (k === "dropped" ? "sm:ml-auto " : "") +
@@ -648,14 +862,42 @@ export default function Tracker({ user, dark, setDark, th }) {
             </span>
           </button>
         ))}
+        <button
+          onClick={() => {
+            setTab("friends");
+            setGq("");
+          }}
+          className={
+            "rounded-full px-3 sm:px-5 py-1.5 sm:py-2 text-sm sm:text-base font-bold transition " +
+            (tab === "friends"
+              ? "bg-ink text-white dark:bg-white dark:text-ink"
+              : "bg-plum/10")
+          }
+        >
+          Friends <span className="opacity-60">{friendList.length}</span>
+        </button>
       </nav>
-      {tab !== "recs" && <Filters f={f} setF={setF} items={items} />}
-      {tab !== "done" && canDrag && visible.length > 1 && (
-        <p className="text-sm opacity-60 text-center sm:text-left">
-          Drag cards to set your reading order. It saves automatically.
-        </p>
-      )}
-      {tab === "recs" ? (
+      <GlobalSearch
+        q={gq}
+        setQ={setGq}
+        scope={gscope}
+        setScope={setGscope}
+        pending={searchPending}
+        results={searchResults}
+        hasFriends={friendList.length > 0}
+        onOpenMine={setOpen}
+        onOpenFriend={(owner) =>
+          setFriendOpen({
+            series: owner.series,
+            friend: {
+              uid: owner.uid,
+              name: owner.name,
+              avatar: owner.avatar
+            }
+          })
+        }
+      />
+      {searchOpen ? null : tab === "recs" ? (
         <RecsView
           recs={recs}
           fp={fp}
@@ -663,31 +905,51 @@ export default function Tracker({ user, dark, setDark, th }) {
           onAdd={addRec}
           onDismiss={dismissRec}
         />
-      ) : visible.length === 0 ? (
-        <div className="text-center py-24 opacity-70">
-          <p className="text-xl font-bold">Nothing here yet</p>
-          <p>Add a series or change your filters.</p>
-        </div>
+      ) : tab === "friends" ? (
+        <FriendsView
+          friends={friendList}
+          series={fs}
+          profiles={fp}
+          mine={items}
+          onOpenFriend={(series, friend) => setFriendOpen({ series, friend })}
+          onAdd={(series, friend) => setAddFor({ series, friend })}
+          onManage={() => setFpanel(true)}
+        />
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
-          {visible.map((s, i) => (
-            <Card
-              key={s.id}
-              s={s}
-              fr={friendHas(s)}
-              onOpen={setOpen}
-              drag={
-                canDrag
-                  ? {
-                      onDragStart: () => (dragIdx.current = i),
-                      onDragOver: (e) => e.preventDefault(),
-                      onDrop: () => drop(i)
-                    }
-                  : null
-              }
-            />
-          ))}
-        </div>
+        <>
+          <Filters f={f} setF={setF} items={items} />
+          {tab !== "done" && canDrag && visible.length > 1 && (
+            <p className="text-sm opacity-60 text-center sm:text-left">
+              Drag cards to set your reading order. It saves automatically.
+            </p>
+          )}
+          {visible.length === 0 ? (
+            <div className="text-center py-24 opacity-70">
+              <p className="text-xl font-bold">Nothing here yet</p>
+              <p>Add a series or change your filters.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
+              {visible.map((s, i) => (
+                <Card
+                  key={s.id}
+                  s={s}
+                  fr={friendHas(s)}
+                  onOpen={setOpen}
+                  drag={
+                    canDrag
+                      ? {
+                          onDragStart: () => (dragIdx.current = i),
+                          onDragOver: (e) => e.preventDefault(),
+                          onDrop: () => drop(i)
+                        }
+                      : null
+                  }
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
       {open && (
         <Drawer
@@ -702,6 +964,56 @@ export default function Tracker({ user, dark, setDark, th }) {
           onShare={(s) => link(s.id)}
           onRecommend={(s) => setRecFor(s)}
           notify={say}
+        />
+      )}
+      {friendOpen && friendLive && (
+        <Drawer
+          key={friendLive.id}
+          item={friendLive}
+          readOnly
+          friend={friendOpen.friend}
+          friendView
+          mine={items}
+          fr={whoElseHas(friendLive, friendOpen.friend.uid)}
+          chars0={fc.filter((c) =>
+            liveFs.some(
+              (row) =>
+                row.user_id === friendOpen.friend.uid &&
+                same(row, friendLive) &&
+                row.id === c.series_id
+            )
+          )}
+          thoughts={thoughtsForFriend(friendLive, friendOpen.friend.uid)}
+          recommendations={recs.filter(
+            (row) =>
+              row.from_user === friendOpen.friend.uid &&
+              same(row.series, friendLive)
+          )}
+          onAdd={(series) =>
+            setAddFor({ series, friend: friendOpen.friend })
+          }
+          onOpenMine={(series) => {
+            setFriendOpen(null);
+            setOpen(series);
+          }}
+          onClose={() => setFriendOpen(null)}
+          notify={say}
+        />
+      )}
+      {addFor && (
+        <AddFromFriend
+          source={addFor.series}
+          mine={items}
+          friendName={addFor.friend?.name || "a friend"}
+          onAdd={(choice) =>
+            addFromFriend(addFor.series, addFor.friend, choice)
+          }
+          onOpen={(series) => {
+            setAddFor(null);
+            setFriendOpen(null);
+            setOpen(series);
+          }}
+          onClose={() => setAddFor(null)}
         />
       )}
       {recFor && (
@@ -738,7 +1050,12 @@ export default function Tracker({ user, dark, setDark, th }) {
       {dupe && (
         <AlreadyOnList
           items={dupe}
-          onOpen={(s) => setOpen(s)}
+          onOpen={(s) => {
+            setDupe(null);
+            setFriendOpen(null);
+            setAddFor(null);
+            setOpen(s);
+          }}
           onClose={() => setDupe(null)}
         />
       )}
