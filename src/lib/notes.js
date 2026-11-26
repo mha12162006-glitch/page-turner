@@ -22,3 +22,16 @@ export function attachOwnNotes(rows = [], notes = []) {
 export function stripNotes(rows = []) {
   return (rows || []).map(({ note, note_shared, ...row }) => row);
 }
+
+/**
+ * The only row shape the app writes. user_id is explicit so RLS can check
+ * ownership, and is_shared is always false so footnotes stay private.
+ */
+export function privateNoteRow(userId, seriesId, note) {
+  return {
+    series_id: seriesId,
+    user_id: userId,
+    note: String(note ?? ""),
+    is_shared: false
+  };
+}

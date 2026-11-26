@@ -27,7 +27,7 @@ import {
   seriesKey,
   visibleFriendSeries
 } from "../lib/search";
-import { attachOwnNotes, stripNotes } from "../lib/notes";
+import { attachOwnNotes, privateNoteRow, stripNotes } from "../lib/notes";
 import { ORDER, positionsFor, readOrder, sortItems, writeOrder } from "../lib/listOrder";
 import { resolveCustom } from "../lib/customPresets";
 import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
@@ -178,6 +178,30 @@ export default function Tracker({ user, dark, setDark, th }) {
     } catch (err) {}
     if (row) setOpen(row);
   }, [items]);
+  /**
+   * Owner-scoped upsert. The old upsert(onConflict: "series_id") depended on a
+   * unique constraint that legacy databases may not have, which made every
+   * footnote save fail with 42P10. An explicit SELECT then UPDATE/INSERT works
+   * on every schema and keeps RLS checks unambiguous (user_id = auth.uid()).
+   */
+  const writeOwnNote = async (seriesId, value) => {
+    const row = privateNoteRow(user.id, seriesId, value);
+    const { data: existing, error: readError } = await sb
+      .from("series_notes")
+      .select("series_id")
+      .eq("series_id", seriesId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (readError) return readError;
+    const result = existing
+      ? await sb
+          .from("series_notes")
+          .update(row)
+          .eq("series_id", seriesId)
+          .eq("user_id", user.id)
+      : await sb.from("series_notes").insert(row);
+    return result.error || null;
+  };
   const save = async (s, chs0 = []) => {
     const {
       id,
@@ -229,18 +253,17 @@ export default function Tracker({ user, dark, setDark, th }) {
     }
 
     const sid = r.data.id;
+    const myNote = String(note ?? "");
     let noteNote = "";
-    const { error: noteError } = await sb.from("series_notes").upsert(
-      {
-        series_id: sid,
-        user_id: user.id,
-        note: String(note ?? ""),
-        is_shared: false
-      },
-      { onConflict: "series_id" }
-    );
-    if (noteError) {
-      console.error("Saving footnote failed:", noteError);
+    try {
+      const noteError = await writeOwnNote(sid, myNote);
+      if (noteError) throw noteError;
+      // Show the saved/cleared footnote on the card without waiting for a reload.
+      setItems((prev) =>
+        prev.map((x) => (x.id === sid ? { ...x, note: myNote } : x))
+      );
+    } catch (err) {
+      console.error("Saving footnote failed:", err);
       noteNote = "Series saved. Footnote could not be updated this time.";
     }
     const origChars = id ? mychars.filter((c) => c.series_id === id) : [];

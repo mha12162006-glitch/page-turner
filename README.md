@@ -66,6 +66,7 @@ All files are safe to re-run.
 | 02 | `supabase/03_translator_recs.sql` | Translator recommendations table, RLS, uniqueness and realtime. Safe to run before the frontend deploy; older frontends ignore it. |
 | 03 | **Deploy the frontend first**, then run `supabase/02_after_frontend_deploy.sql` | Moves footnotes into `public.series_notes` and drops `public.series.notes`. **Must come before `04`** because the final step removes the old column that the previous frontend still writes to. |
 | 04 | `supabase/04_private_footnotes.sql` | Makes footnotes strictly private: flips existing rows, sets the default and a check constraint to `false`, and removes the friend-read policy. Run after the frontend deploy. |
+| 05 | `supabase/05_fix_footnote_save.sql` | Guarantees a unique `series_id` for footnote writes, simplifies RLS to `user_id = auth.uid()` on insert/update, and keeps footnotes owner-only. Run after `04`. |
 
 If you applied a separate privacy migration in an earlier stage, re-run
 `01_reconcile_and_fix.sql` afterwards: it drops and recreates the policies, so
@@ -99,8 +100,8 @@ publication where possible.
    `application/javascript` for the service worker.
 5. After the new frontend is live, run
    `supabase/02_after_frontend_deploy.sql` if you have not run it yet, then run
-   `supabase/04_private_footnotes.sql` to make footnotes private at the database
-   level as well.
+   `supabase/04_private_footnotes.sql` and `supabase/05_fix_footnote_save.sql`
+   to make footnote writes reliable and private at the database level too.
 6. **Service worker updates:** `public/sw.js` has a `VERSION` constant. Bump it
    for every deploy (e.g. `v2` → `v3`). The install handler deletes older
    `manhwa-tracker-v*` caches, so returning visitors get the new build on the
@@ -150,9 +151,11 @@ only; they do not affect list order.
 - Translator recommendations follow the visibility of their parent series and
   are never exposed to public share links.
 - Footnotes are always private: they are never fetched for friends, shown in
-  FriendLine, or exposed on public share links. Your own footnote appears
-  directly on your front-page card. The optional database migration
-  `supabase/04_private_footnotes.sql` enforces this in Supabase as well.
+  FriendLine, global search, or public share links. Every write sets
+  `is_shared: false` and `user_id` to the signed-in user. Your own footnote is
+  loaded with your series and appears directly on your front-page card as soon
+  as you save it. `supabase/04_private_footnotes.sql` and
+  `supabase/05_fix_footnote_save.sql` enforce this in Supabase as well.
 - Your own review is always visible on your front-page card (with
   `[bracketed]` spoilers blurred). Friends' reviews stay collapsed behind a
   "Review" toggle.
