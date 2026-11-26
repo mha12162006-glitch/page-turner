@@ -133,7 +133,6 @@ export default function Drawer({
     ...item,
     is_hidden: !!item.is_hidden,
     note: item.note || "",
-    note_shared: item.note_shared !== false,
     genres: joinTags(item.genres),
     tags: joinTags(item.tags),
     warnings: joinWarnings(item.warnings),
@@ -450,36 +449,6 @@ export default function Drawer({
             </button>
           ))}
         </div>
-        {!readOnly && (
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-plum/10 p-3">
-            <div>
-              <p className="font-bold">🔒 Hide from friends</p>
-              <p className="text-xs opacity-70">
-                Hidden titles stay on your list but never appear in friends’
-                search, your friend profile, recommendations or public share
-                links.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={!!f.is_hidden}
-              aria-label="Hide from friends"
-              onClick={() => set("is_hidden", !f.is_hidden)}
-              className={
-                "relative h-6 w-11 shrink-0 rounded-full transition " +
-                (f.is_hidden ? "bg-plum" : "bg-plum/25")
-              }
-            >
-              <span
-                className={
-                  "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition " +
-                  (f.is_hidden ? "translate-x-5" : "")
-                }
-              />
-            </button>
-          </div>
-        )}
         {["reading", "hiatus", "dropped", "done"].includes(f.status) && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -781,14 +750,6 @@ export default function Drawer({
             </p>
           </div>
         )}
-        <TranslatorRecs
-          rows={translatorRecs}
-          seriesId={item.id}
-          readOnly={readOnly}
-          onSave={onSaveTranslator}
-          onDelete={onDeleteTranslator}
-          notify={notice}
-        />
         {readOnly && friendView && f.source && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
             <p className="font-bold">🔎 Found via</p>
@@ -797,21 +758,13 @@ export default function Drawer({
             </p>
           </div>
         )}
-        {readOnly && friendView && f.note && f.note_shared !== false && (
-          <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
-            <p className="font-bold">📝 Footnote</p>
-            <p className="text-sm break-words whitespace-pre-line">
-              {f.note}
-            </p>
-          </div>
-        )}
         {!readOnly && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-3">
             <div>
               <p className="font-bold">📝 Footnote</p>
               <p className="text-xs opacity-70">
-                A note for this series. Keep it private or share it with
-                friends.
+                A private note for this series. It also appears on your card
+                and is never shown to friends or on public share links.
               </p>
             </div>
             <L t="Footnote">
@@ -822,35 +775,42 @@ export default function Drawer({
                 onChange={(e) => set("note", e.target.value)}
               />
             </L>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="font-bold">Visible to friends</p>
-                <p className="text-xs opacity-70">
-                  Shared footnotes appear on your friend card and in the
-                  read-only details. Public share links never show footnotes.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={!!f.note_shared}
-                aria-label="Visible to friends"
-                onClick={() => set("note_shared", !f.note_shared)}
-                className={
-                  "relative h-6 w-11 shrink-0 rounded-full transition " +
-                  (f.note_shared ? "bg-plum" : "bg-plum/25")
-                }
-              >
-                <span
-                  className={
-                    "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition " +
-                    (f.note_shared ? "translate-x-5" : "")
-                  }
-                />
-              </button>
-            </div>
           </div>
         )}
+        {!readOnly && (
+          <div
+            className="flex items-center gap-2 text-xs"
+            title="Hidden titles stay off friends' lists and share links"
+          >
+            <span className="font-semibold opacity-70">Hide from friends</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={!!f.is_hidden}
+              aria-label="Hide from friends"
+              onClick={() => set("is_hidden", !f.is_hidden)}
+              className={
+                "relative h-4 w-7 shrink-0 rounded-full transition " +
+                (f.is_hidden ? "bg-plum" : "bg-plum/25")
+              }
+            >
+              <span
+                className={
+                  "absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white shadow transition " +
+                  (f.is_hidden ? "translate-x-3" : "")
+                }
+              />
+            </button>
+          </div>
+        )}
+        <TranslatorRecs
+          rows={translatorRecs}
+          seriesId={item.id}
+          readOnly={readOnly}
+          onSave={onSaveTranslator}
+          onDelete={onDeleteTranslator}
+          notify={notice}
+        />
         <div
           className={
             "rounded-2xl p-4 space-y-3 transition " +

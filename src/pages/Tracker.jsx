@@ -27,7 +27,7 @@ import {
   seriesKey,
   visibleFriendSeries
 } from "../lib/search";
-import { attachOwnNotes, attachSharedNotes } from "../lib/notes";
+import { attachOwnNotes, stripNotes } from "../lib/notes";
 import { ORDER, positionsFor, readOrder, sortItems, writeOrder } from "../lib/listOrder";
 import { resolveCustom } from "../lib/customPresets";
 import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
@@ -107,7 +107,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         .order("position"),
       sb
         .from("series_notes")
-        .select("series_id,user_id,note,is_shared")
+        .select("series_id,user_id,note")
         .eq("user_id", user.id)
     ]);
     setItems(attachOwnNotes(seriesResult.data || [], notesResult.data || []));
@@ -185,7 +185,6 @@ export default function Tracker({ user, dark, setDark, th }) {
       user_id,
       notes: _legacyNotes,
       note,
-      note_shared,
       ...r0
     } = s;
     let rest = r0;
@@ -236,7 +235,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         series_id: sid,
         user_id: user.id,
         note: String(note ?? ""),
-        is_shared: note_shared !== false
+        is_shared: false
       },
       { onConflict: "series_id" }
     );
@@ -313,20 +312,13 @@ export default function Tracker({ user, dark, setDark, th }) {
       setTrecs(data || []);
       return;
     }
-    const [a, b, c, d, e] = await Promise.all([
+    const [a, b, c, d] = await Promise.all([
       sb.from("profiles").select("*").in("user_id", ids),
       acc.length
         ? sb.from("series").select(SERIES_COLUMNS).in("user_id", acc)
         : { data: [] },
       acc.length
         ? sb.from("series_characters").select("*").in("user_id", acc)
-        : { data: [] },
-      acc.length
-        ? sb
-            .from("series_notes")
-            .select("series_id,user_id,note,is_shared")
-            .in("user_id", acc)
-            .eq("is_shared", true)
         : { data: [] },
       sb
         .from("translator_recs")
@@ -335,12 +327,12 @@ export default function Tracker({ user, dark, setDark, th }) {
         )
         .in("user_id", [user.id, ...acc])
     ]);
-    const visibleRows = visibleFriendSeries(b.data || []);
+    const visibleRows = stripNotes(visibleFriendSeries(b.data || []));
     const visibleIds = new Set(visibleRows.map((row) => row.id));
     setFp(Object.fromEntries((a.data || []).map((x) => [x.user_id, x])));
-    setFs(attachSharedNotes(visibleRows, d.data || []));
+    setFs(visibleRows);
     setFc((c.data || []).filter((row) => visibleIds.has(row.series_id)));
-    setTrecs(e.data || []);
+    setTrecs(d.data || []);
   };
   useEffect(() => {
     loadFriends();
@@ -353,11 +345,6 @@ export default function Tracker({ user, dark, setDark, th }) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "series" },
-        loadFriends
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "series_notes" },
         loadFriends
       )
       .on(
@@ -423,7 +410,6 @@ export default function Tracker({ user, dark, setDark, th }) {
         status: own.status,
         rating: own.rating,
         review: own.review,
-        note: own.note,
         priority: own.priority,
         chapter: own.chapter,
         total: own.total_chapters
@@ -438,7 +424,6 @@ export default function Tracker({ user, dark, setDark, th }) {
         status: row.status,
         rating: row.rating,
         review: row.review,
-        note: row.note,
         priority: row.priority,
         chapter: row.chapter,
         total: row.total_chapters
@@ -461,17 +446,6 @@ export default function Tracker({ user, dark, setDark, th }) {
     ]);
     setSentRecs(outgoing || []);
     const rows = (data || []).filter((row) => row.series);
-    const ids = [...new Set(rows.map((row) => row.series.id).filter(Boolean))];
-    const { data: noteRows } = ids.length
-      ? await sb
-          .from("series_notes")
-          .select("series_id,user_id,note,is_shared")
-          .in("series_id", ids)
-          .eq("is_shared", true)
-      : { data: [] };
-    const notes = new Map(
-      (noteRows || []).map((row) => [row.series_id, row.note || ""])
-    );
     const seen = new Set();
     const next = [];
     for (const row of rows) {
@@ -479,10 +453,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       const key = (row.from_user || "") + "|" + seriesKey(row.series);
       if (seen.has(key)) continue;
       seen.add(key);
-      next.push({
-        ...row,
-        series: { ...row.series, note: notes.get(row.series.id) || "" }
-      });
+      next.push({ ...row, series: stripNotes([row.series])[0] });
     }
     setRecs(next);
   };

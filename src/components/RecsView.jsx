@@ -58,7 +58,6 @@ export default function RecsView({ recs, fp, items, onAdd, onDismiss }) {
                   status: s.status,
                   rating: s.rating,
                   review: s.review,
-                  note: s.note,
                   priority: s.priority,
                   chapter: s.chapter,
                   total: s.total_chapters

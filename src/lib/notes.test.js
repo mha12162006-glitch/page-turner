@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachOwnNotes, attachSharedNotes, noteShared } from "./notes";
+import { attachOwnNotes, stripNotes } from "./notes";
 
 const series = (over = {}) => ({
   id: "series-1",
@@ -7,39 +7,33 @@ const series = (over = {}) => ({
   ...over
 });
 
-describe("footnote visibility", () => {
-  it("defaults a missing footnote row to empty and friends-visible", () => {
+describe("private footnotes", () => {
+  it("defaults a missing footnote row to empty", () => {
     const [row] = attachOwnNotes([series()], []);
     expect(row.note).toBe("");
-    expect(row.note_shared).toBe(true);
   });
 
-  it("keeps my private footnote on my own rows", () => {
+  it("keeps my footnote on my own rows regardless of the legacy flag", () => {
     const [row] = attachOwnNotes(
       [series()],
-      [{ series_id: "series-1", note: "Only me", is_shared: false }]
+      [{ series_id: "series-1", note: "Only me", is_shared: true }]
     );
     expect(row.note).toBe("Only me");
-    expect(row.note_shared).toBe(false);
+    expect(row.note_shared).toBeUndefined();
   });
 
-  it("attaches only shared, non-empty footnotes to friend rows", () => {
-    const rows = attachSharedNotes(
-      [series(), series({ id: "series-2" }), series({ id: "series-3" })],
-      [
-        { series_id: "series-1", note: "Shared", is_shared: true },
-        { series_id: "series-2", note: "Private", is_shared: false },
-        { series_id: "series-3", note: "   ", is_shared: true }
-      ]
-    );
-    expect(rows[0].note).toBe("Shared");
-    expect(rows[1].note).toBe("");
-    expect(rows[2].note).toBe("");
+  it("removes footnote text from friend-facing rows", () => {
+    const [row] = stripNotes([series({ note: "Secret", note_shared: true })]);
+    expect(row.note).toBeUndefined();
+    expect(row.note_shared).toBeUndefined();
+    expect(row.title).toBe("One");
   });
 
-  it("treats only an explicit false as private", () => {
-    expect(noteShared(undefined)).toBe(true);
-    expect(noteShared({ is_shared: true })).toBe(true);
-    expect(noteShared({ is_shared: false })).toBe(false);
+  it("keeps other series fields intact when stripping notes", () => {
+    const [row] = stripNotes([
+      series({ note: "", review: "A review", is_hidden: false })
+    ]);
+    expect(row.review).toBe("A review");
+    expect(row.is_hidden).toBe(false);
   });
 });

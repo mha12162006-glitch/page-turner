@@ -16,7 +16,7 @@ add friends, recommend series, and collect translator recommendations.
 - Spoiler blur for reviews, friend notes and spoiler-tagged comments.
 - Friend requests, friend lists with live status filters, outgoing and
   incoming recommendations, and hidden series.
-- Private or shared footnotes (`series_notes`).
+- Strictly private footnotes (`series_notes`).
 - Translator recommendations shared between accepted friends.
 - Installable PWA with an offline-capable service worker.
 
@@ -64,7 +64,8 @@ All files are safe to re-run.
 | 00 | `schema.sql` | Base tables, columns, RLS and realtime publication for a fresh project. If you have an older database that already had characters, `stage2.sql` is also safe to run. |
 | 01 | `supabase/01_reconcile_and_fix.sql` | Reconciles older schemas and installs the friend-only RLS/privacy policies (`is_hidden`, accepted-friend checks). This is the privacy migration: it replaces all policies on profiles, series, characters, friendships and recommendations. |
 | 02 | `supabase/03_translator_recs.sql` | Translator recommendations table, RLS, uniqueness and realtime. Safe to run before the frontend deploy; older frontends ignore it. |
-| 03 | **Deploy the frontend first**, then run `supabase/02_after_frontend_deploy.sql` | Moves footnotes into `public.series_notes` and drops `public.series.notes`. **Must be last** because the final step removes the old column that the previous frontend still writes to. |
+| 03 | **Deploy the frontend first**, then run `supabase/02_after_frontend_deploy.sql` | Moves footnotes into `public.series_notes` and drops `public.series.notes`. **Must come before `04`** because the final step removes the old column that the previous frontend still writes to. |
+| 04 | `supabase/04_private_footnotes.sql` | Makes footnotes strictly private: flips existing rows, sets the default and a check constraint to `false`, and removes the friend-read policy. Run after the frontend deploy. |
 
 If you applied a separate privacy migration in an earlier stage, re-run
 `01_reconcile_and_fix.sql` afterwards: it drops and recreates the policies, so
@@ -97,7 +98,9 @@ publication where possible.
    root with `Content-Type: application/manifest+json` for the manifest and
    `application/javascript` for the service worker.
 5. After the new frontend is live, run
-   `supabase/02_after_frontend_deploy.sql` if you have not run it yet.
+   `supabase/02_after_frontend_deploy.sql` if you have not run it yet, then run
+   `supabase/04_private_footnotes.sql` to make footnotes private at the database
+   level as well.
 6. **Service worker updates:** `public/sw.js` has a `VERSION` constant. Bump it
    for every deploy (e.g. `v2` → `v3`). The install handler deletes older
    `manhwa-tracker-v*` caches, so returning visitors get the new build on the
@@ -145,6 +148,10 @@ manual arrangement is never overwritten by a later reload.
 - Friend recommendations are only visible to the sender and recipient.
 - Translator recommendations follow the visibility of their parent series and
   are never exposed to public share links.
-- Footnotes are shared with friends by default; switch off "Visible to
-  friends" in the drawer to keep an individual footnote private. Public share
-  links never show footnotes.
+- Footnotes are always private: they are never fetched for friends, shown in
+  FriendLine, or exposed on public share links. Your own footnote appears
+  directly on your front-page card. The optional database migration
+  `supabase/04_private_footnotes.sql` enforces this in Supabase as well.
+- Your own review is always visible on your front-page card (with
+  `[bracketed]` spoilers blurred). Friends' reviews stay collapsed behind a
+  "Review" toggle.

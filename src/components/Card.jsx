@@ -31,11 +31,6 @@ export function FriendLine({ x, showName = true }) {
           </p>
         </details>
       )}
-      {x.note && (
-        <p className="italic opacity-70 break-words whitespace-pre-line">
-          “{x.note}”
-        </p>
-      )}
     </div>
   );
 }
@@ -47,7 +42,6 @@ export default function Card({
   readOnly,
   fr,
   onAdd,
-  showNote = !readOnly,
   outgoing = [],
   onWithdraw,
   translatorCount = 0,
@@ -229,22 +223,44 @@ export default function Card({
           </div>
         )}
         {(s.status === "done" || s.status === "dropped") && s.review && (
-          <details
-            className="mt-2 text-xs rounded-lg bg-plum/10 px-2 py-1"
+          readOnly ? (
+            <details
+              className="mt-2 text-xs rounded-lg bg-plum/10 px-2 py-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <summary className="cursor-pointer font-bold text-plum">
+                Review
+              </summary>
+              <p className="mt-1 break-words whitespace-pre-line">
+                <SpoilerText text={s.review} />
+              </p>
+            </details>
+          ) : (
+            <div
+              className="mt-2 rounded-lg bg-plum/10 px-2 py-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="text-[11px] font-bold uppercase tracking-wide text-plum">
+                My review
+              </p>
+              <p className="mt-1 text-xs break-words whitespace-pre-line">
+                <SpoilerText text={s.review} />
+              </p>
+            </div>
+          )
+        )}
+        {!readOnly && s.note && (
+          <div
+            className="mt-2 rounded-lg border-l-2 border-plum/40 bg-plum/5 px-2 py-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            <summary className="cursor-pointer font-bold text-plum">
-              My review
-            </summary>
-            <p className="mt-1 break-words whitespace-pre-line">
-              <SpoilerText text={s.review} />
+            <p className="text-[11px] font-bold uppercase tracking-wide opacity-60">
+              My footnote
             </p>
-          </details>
-        )}
-        {showNote && s.note && (
-          <p className="mt-2 text-xs italic opacity-70 break-words whitespace-pre-line">
-            “{s.note}”
-          </p>
+            <p className="mt-0.5 text-xs italic break-words whitespace-pre-line">
+              {s.note}
+            </p>
+          </div>
         )}
       </div>
     </article>
