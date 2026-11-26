@@ -8,8 +8,8 @@ add friends, recommend series, and collect translator recommendations.
 
 - Reading status tabs, hype stars, priority picks, chapters and reviews.
 - Recently added by default, with a **Recently added / Custom order** switch.
-  Dragging a card or using the ↑ ↓ buttons saves `position` and switches to
-  Custom order automatically.
+  Dragging a card saves `position` and switches to Custom order automatically.
+- Compact `−` / `+` buttons on your cards update the chapter count in place.
 - AniList search for synopsis, cover, genres and characters. **Reading links
   are never auto-filled** — you add your own http(s) link in the drawer.
 - Trigger warnings, genres and tropes with permanent custom chips.
@@ -113,10 +113,10 @@ publication where possible.
   open and returns to the button that opened it on close.
 - `Tab` is trapped inside the open overlay and `aria-modal="true"` plus a
   descriptive `aria-label` are set on each panel.
-- Icon-only controls (close, move up/down, withdraw, add/remove custom chip,
+- Icon-only controls (close, chapter `−`/`+`, withdraw, add/remove custom chip,
   edit/delete translator entry) have `aria-label`s.
-- Card reordering works with mouse drag on desktop and explicit ↑ ↓ buttons
-  on touch devices.
+- Card reordering works with mouse drag on desktop; chapter buttons work on
+  touch devices too.
 
 ## Testing
 
@@ -137,9 +137,10 @@ The default order is **Recently added** (`created_at` descending). The
 - **Recently added** — newest series first, regardless of `position`.
 - **Custom order** — your saved `position` order.
 
-Dragging a card or pressing a card's ↑ ↓ button writes the new `position`
-values to `public.series` and switches the selector to Custom order, so your
-manual arrangement is never overwritten by a later reload.
+Dragging a card writes the new `position` values to `public.series` and
+switches the selector to Custom order, so your manual arrangement is never
+overwritten by a later reload. Chapter `−` / `+` buttons change `chapter`
+only; they do not affect list order.
 
 ## Privacy notes
 

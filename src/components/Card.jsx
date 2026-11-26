@@ -45,9 +45,7 @@ export default function Card({
   outgoing = [],
   onWithdraw,
   translatorCount = 0,
-  onMove,
-  moveUpDisabled = false,
-  moveDownDisabled = false
+  onChapter
 }) {
   const mine = (fr || []).find((x) => x.isMe === true);
   return (
@@ -112,20 +110,54 @@ export default function Card({
           <p className="text-xs opacity-60">{s.pub_status}</p>
         )}
         {["reading", "hiatus", "dropped"].includes(s.status) &&
-          s.chapter != null && (
+          (s.chapter != null || (!readOnly && onChapter)) && (
             <div className="mt-1">
-              <p className="text-xs font-semibold">
-                Ch. {s.chapter}
-                {s.total_chapters ? " / " + s.total_chapters : ""}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-semibold">
+                  Ch. {s.chapter ?? 0}
+                  {s.total_chapters ? " / " + s.total_chapters : ""}
+                </p>
+                {!readOnly && onChapter && (
+                  <span
+                    className="flex items-center gap-0.5"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      aria-label={"Decrease chapter for " + s.title}
+                      title="Decrease chapter"
+                      disabled={(s.chapter ?? 0) <= 0}
+                      onClick={() => onChapter(-1)}
+                      className="grid h-5 w-5 place-items-center rounded-md bg-plum/15 text-xs font-bold text-plum hover:bg-plum/25 disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={"Increase chapter for " + s.title}
+                      title="Increase chapter"
+                      disabled={
+                        s.total_chapters > 0 &&
+                        (s.chapter ?? 0) >= s.total_chapters
+                      }
+                      onClick={() => onChapter(1)}
+                      className="grid h-5 w-5 place-items-center rounded-md bg-plum/15 text-xs font-bold text-plum hover:bg-plum/25 disabled:opacity-30"
+                    >
+                      +
+                    </button>
+                  </span>
+                )}
+              </div>
               {s.total_chapters > 0 && (
                 <div className="h-1.5 rounded-full bg-plum/15 overflow-hidden">
                   <div
                     className="h-full bg-plum"
                     style={{
                       width:
-                        Math.min(100, (s.chapter / s.total_chapters) * 100) +
-                        "%"
+                        Math.min(
+                          100,
+                          ((s.chapter ?? 0) / s.total_chapters) * 100
+                        ) + "%"
                     }}
                   />
                 </div>
@@ -188,33 +220,6 @@ export default function Card({
               </span>
             )}
         </div>
-        {onMove && (
-          <div
-            className="mt-2 flex gap-1"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              aria-label={"Move " + s.title + " up"}
-              title="Move up"
-              disabled={moveUpDisabled}
-              onClick={() => onMove(-1)}
-              className="grid h-7 flex-1 place-items-center rounded-lg bg-plum/15 text-sm font-bold text-plum disabled:opacity-30"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              aria-label={"Move " + s.title + " down"}
-              title="Move down"
-              disabled={moveDownDisabled}
-              onClick={() => onMove(1)}
-              className="grid h-7 flex-1 place-items-center rounded-lg bg-plum/15 text-sm font-bold text-plum disabled:opacity-30"
-            >
-              ↓
-            </button>
-          </div>
-        )}
         {fr && fr.length > 0 && (
           <div className="mt-2 divide-y divide-plum/15 border-t border-plum/20">
             {fr.map((x, i) => (

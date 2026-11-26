@@ -880,14 +880,28 @@ export default function Tracker({ user, dark, setDark, th }) {
     list.splice(to, 0, m);
     await commitOrder(list);
   };
-  const move = async (id, direction) => {
-    const list = [...visible];
-    const from = list.findIndex((row) => row.id === id);
-    const to = from + direction;
-    if (from < 0 || to < 0 || to >= list.length) return;
-    const [row] = list.splice(from, 1);
-    list.splice(to, 0, row);
-    await commitOrder(list);
+  const bumpChapter = async (s, delta) => {
+    const current = Math.max(0, Number(s.chapter) || 0);
+    const total = Number(s.total_chapters) > 0 ? Number(s.total_chapters) : null;
+    const next = Math.min(
+      total ?? Number.MAX_SAFE_INTEGER,
+      Math.max(0, current + delta)
+    );
+    if (next === current) return;
+    setItems((prev) =>
+      prev.map((x) => (x.id === s.id ? { ...x, chapter: next } : x))
+    );
+    const { error } = await sb
+      .from("series")
+      .update({ chapter: next })
+      .eq("id", s.id);
+    if (error) {
+      console.error("Saving chapter failed:", error);
+      say("Could not save the chapter count. Please try again.");
+      setItems((prev) =>
+        prev.map((x) => (x.id === s.id ? { ...x, chapter: current } : x))
+      );
+    }
   };
   const onFile = async (e) => {
     const file = e.target.files[0];
@@ -1190,13 +1204,7 @@ export default function Tracker({ user, dark, setDark, th }) {
                   outgoing={sentFor(s)}
                   onWithdraw={withdrawSent}
                   translatorCount={translatorRowsFor(s).length}
-                  onMove={
-                    canDrag
-                      ? (direction) => move(s.id, direction)
-                      : null
-                  }
-                  moveUpDisabled={i === 0}
-                  moveDownDisabled={i === visible.length - 1}
+                  onChapter={(delta) => bumpChapter(s, delta)}
                   drag={
                     canDrag
                       ? {
