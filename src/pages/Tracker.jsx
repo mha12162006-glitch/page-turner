@@ -179,28 +179,26 @@ export default function Tracker({ user, dark, setDark, th }) {
     if (row) setOpen(row);
   }, [items]);
   /**
-   * Owner-scoped upsert. The old upsert(onConflict: "series_id") depended on a
-   * unique constraint that legacy databases may not have, which made every
-   * footnote save fail with 42P10. An explicit SELECT then UPDATE/INSERT works
-   * on every schema and keeps RLS checks unambiguous (user_id = auth.uid()).
+   * series_notes columns (see supabase/02 + 05): series_id (PK), user_id, note,
+   * is_shared, updated_at. A cleared footnote deletes its row; otherwise the
+   * upsert conflicts on the series_id primary key. user_id is always explicit
+   * and is_shared is always false so the note stays private to its owner.
    */
   const writeOwnNote = async (seriesId, value) => {
-    const row = privateNoteRow(user.id, seriesId, value);
-    const { data: existing, error: readError } = await sb
+    const note = String(value ?? "");
+    if (!note.trim()) {
+      const { error } = await sb
+        .from("series_notes")
+        .delete()
+        .eq("series_id", seriesId)
+        .eq("user_id", user.id);
+      return error || null;
+    }
+    const row = privateNoteRow(user.id, seriesId, note);
+    const { error } = await sb
       .from("series_notes")
-      .select("series_id")
-      .eq("series_id", seriesId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (readError) return readError;
-    const result = existing
-      ? await sb
-          .from("series_notes")
-          .update(row)
-          .eq("series_id", seriesId)
-          .eq("user_id", user.id)
-      : await sb.from("series_notes").insert(row);
-    return result.error || null;
+      .upsert(row, { onConflict: "series_id" });
+    return error || null;
   };
   const save = async (s, chs0 = []) => {
     const {
@@ -262,9 +260,9 @@ export default function Tracker({ user, dark, setDark, th }) {
       setItems((prev) =>
         prev.map((x) => (x.id === sid ? { ...x, note: myNote } : x))
       );
-    } catch (err) {
-      console.error("Saving footnote failed:", err);
-      noteNote = "Series saved. Footnote could not be updated this time.";
+    } catch (error) {
+      console.error(error);
+      noteNote = `Footnote error: ${error.message}`;
     }
     const origChars = id ? mychars.filter((c) => c.series_id === id) : [];
     let charNote = "";
