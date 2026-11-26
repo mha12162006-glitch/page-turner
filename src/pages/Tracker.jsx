@@ -4,12 +4,14 @@ import {
   addFriend,
   findExistingSeries,
   isUniqueViolation,
-  sb
+  sb,
+  SERIES_COLUMNS
 } from "../lib/supabase";
 import {
   applyF,
   blank,
   emptyF,
+  httpUrl,
   malImport,
   norm,
   readMalFile,
@@ -25,6 +27,10 @@ import {
   seriesKey,
   visibleFriendSeries
 } from "../lib/search";
+import { attachOwnNotes, attachSharedNotes } from "../lib/notes";
+import { resolveCustom } from "../lib/customPresets";
+import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
+import { WARNING_PRESETS } from "../lib/warnings";
 import AddFromFriend from "../components/AddFromFriend";
 import AlreadyOnList from "../components/AlreadyOnList";
 import Avatar from "../components/Avatar";
@@ -54,6 +60,8 @@ export default function Tracker({ user, dark, setDark, th }) {
   const [fs, setFs] = useState([]);
   const [fpanel, setFpanel] = useState(false);
   const [recs, setRecs] = useState([]);
+  const [sentRecs, setSentRecs] = useState([]);
+  const [trecs, setTrecs] = useState([]);
   const [recFor, setRecFor] = useState(null);
   const [mychars, setMychars] = useState([]);
   const [fc, setFc] = useState([]);
@@ -67,19 +75,41 @@ export default function Tracker({ user, dark, setDark, th }) {
   const dragIdx = useRef(null);
   const fileRef = useRef();
   const toastTimer = useRef();
+  const customOptions = useMemo(
+    () => ({
+      warnings: resolveCustom(
+        "warnings",
+        WARNING_PRESETS,
+        items.map((x) => x.warnings)
+      ),
+      genres: resolveCustom(
+        "genres",
+        GENRE_PRESETS,
+        items.map((x) => x.genres)
+      ),
+      tags: resolveCustom("tags", TROPE_PRESETS, items.map((x) => x.tags))
+    }),
+    [items]
+  );
   const load = async () => {
-    const { data } = await sb
-      .from("series")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("position");
-    setItems(data || []);
-    const cc = await sb
-      .from("series_characters")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("position");
-    setMychars(cc.data || []);
+    const [seriesResult, charsResult, notesResult] = await Promise.all([
+      sb
+        .from("series")
+        .select(SERIES_COLUMNS)
+        .eq("user_id", user.id)
+        .order("position"),
+      sb
+        .from("series_characters")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("position"),
+      sb
+        .from("series_notes")
+        .select("series_id,user_id,note,is_shared")
+        .eq("user_id", user.id)
+    ]);
+    setItems(attachOwnNotes(seriesResult.data || [], notesResult.data || []));
+    setMychars(charsResult.data || []);
   };
   useEffect(() => {
     load();
@@ -91,6 +121,16 @@ export default function Tracker({ user, dark, setDark, th }) {
           event: "*",
           schema: "public",
           table: "series",
+          filter: "user_id=eq." + user.id
+        },
+        load
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "series_notes",
           filter: "user_id=eq." + user.id
         },
         load
@@ -137,7 +177,15 @@ export default function Tracker({ user, dark, setDark, th }) {
     if (row) setOpen(row);
   }, [items]);
   const save = async (s, chs0 = []) => {
-    const { id, created_at, user_id, ...r0 } = s;
+    const {
+      id,
+      created_at,
+      user_id,
+      notes: _legacyNotes,
+      note,
+      note_shared,
+      ...r0
+    } = s;
     let rest = r0;
     let chs = chs0;
     if (needsEnrichment(rest)) {
@@ -153,14 +201,14 @@ export default function Tracker({ user, dark, setDark, th }) {
       }
     }
     const r = id
-      ? await sb.from("series").update(rest).eq("id", id).select().single()
+      ? await sb.from("series").update(rest).eq("id", id).select("id").single()
       : await sb
           .from("series")
           .insert({
             ...rest,
             position: Math.max(-1, ...items.map((i) => i.position)) + 1
           })
-          .select()
+          .select("id")
           .single();
     if (r.error) {
       if (!id && isUniqueViolation(r.error)) {
@@ -180,6 +228,20 @@ export default function Tracker({ user, dark, setDark, th }) {
     }
 
     const sid = r.data.id;
+    let noteNote = "";
+    const { error: noteError } = await sb.from("series_notes").upsert(
+      {
+        series_id: sid,
+        user_id: user.id,
+        note: String(note ?? ""),
+        is_shared: note_shared !== false
+      },
+      { onConflict: "series_id" }
+    );
+    if (noteError) {
+      console.error("Saving footnote failed:", noteError);
+      noteNote = "Series saved. Footnote could not be updated this time.";
+    }
     const origChars = id ? mychars.filter((c) => c.series_id === id) : [];
     let charNote = "";
     if (chs.length > 0 && !sameChars(origChars, chs)) {
@@ -212,7 +274,7 @@ export default function Tracker({ user, dark, setDark, th }) {
     }
     setOpen(null);
     await load();
-    say(charNote || (id ? "Saved" : "Added"));
+    say(charNote || noteNote || (id ? "Saved" : "Added"));
   };
   const saveProf = async (p) => {
     const { error } = await sb.from("profiles").upsert({ user_id: user.id, ...p });
@@ -240,20 +302,43 @@ export default function Tracker({ user, dark, setDark, th }) {
       setFp({});
       setFs([]);
       setFc([]);
+      const { data } = await sb
+        .from("translator_recs")
+        .select(
+          "id,series_id,user_id,name,language,type,link,note,created_at,updated_at,series(anilist_id,title,user_id,is_hidden)"
+        )
+        .eq("user_id", user.id);
+      setTrecs(data || []);
       return;
     }
-    const [a, b, c] = await Promise.all([
+    const [a, b, c, d, e] = await Promise.all([
       sb.from("profiles").select("*").in("user_id", ids),
-      acc.length ? sb.from("series").select("*").in("user_id", acc) : { data: [] },
+      acc.length
+        ? sb.from("series").select(SERIES_COLUMNS).in("user_id", acc)
+        : { data: [] },
       acc.length
         ? sb.from("series_characters").select("*").in("user_id", acc)
-        : { data: [] }
+        : { data: [] },
+      acc.length
+        ? sb
+            .from("series_notes")
+            .select("series_id,user_id,note,is_shared")
+            .in("user_id", acc)
+            .eq("is_shared", true)
+        : { data: [] },
+      sb
+        .from("translator_recs")
+        .select(
+          "id,series_id,user_id,name,language,type,link,note,created_at,updated_at,series(anilist_id,title,user_id,is_hidden)"
+        )
+        .in("user_id", [user.id, ...acc])
     ]);
     const visibleRows = visibleFriendSeries(b.data || []);
     const visibleIds = new Set(visibleRows.map((row) => row.id));
     setFp(Object.fromEntries((a.data || []).map((x) => [x.user_id, x])));
-    setFs(visibleRows);
+    setFs(attachSharedNotes(visibleRows, d.data || []));
     setFc((c.data || []).filter((row) => visibleIds.has(row.series_id)));
+    setTrecs(e.data || []);
   };
   useEffect(() => {
     loadFriends();
@@ -266,6 +351,16 @@ export default function Tracker({ user, dark, setDark, th }) {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "series" },
+        loadFriends
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "series_notes" },
+        loadFriends
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "translator_recs" },
         loadFriends
       )
       .subscribe();
@@ -326,7 +421,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         status: own.status,
         rating: own.rating,
         review: own.review,
-        notes: own.notes,
+        note: own.note,
         priority: own.priority,
         chapter: own.chapter,
         total: own.total_chapters
@@ -341,7 +436,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         status: row.status,
         rating: row.rating,
         review: row.review,
-        notes: row.notes,
+        note: row.note,
         priority: row.priority,
         chapter: row.chapter,
         total: row.total_chapters
@@ -350,19 +445,42 @@ export default function Tracker({ user, dark, setDark, th }) {
     return out;
   };
   const loadRecs = async () => {
-    const { data } = await sb
-      .from("recommendations")
-      .select("*, series(*)")
-      .eq("to_user", user.id)
-      .order("created_at", { ascending: false });
+    const [{ data }, { data: outgoing }] = await Promise.all([
+      sb
+        .from("recommendations")
+        .select("*, series(" + SERIES_COLUMNS + ")")
+        .eq("to_user", user.id)
+        .order("created_at", { ascending: false }),
+      sb
+        .from("recommendations")
+        .select("id,to_user,series_id,created_at")
+        .eq("from_user", user.id)
+        .order("created_at", { ascending: false })
+    ]);
+    setSentRecs(outgoing || []);
+    const rows = (data || []).filter((row) => row.series);
+    const ids = [...new Set(rows.map((row) => row.series.id).filter(Boolean))];
+    const { data: noteRows } = ids.length
+      ? await sb
+          .from("series_notes")
+          .select("series_id,user_id,note,is_shared")
+          .in("series_id", ids)
+          .eq("is_shared", true)
+      : { data: [] };
+    const notes = new Map(
+      (noteRows || []).map((row) => [row.series_id, row.note || ""])
+    );
     const seen = new Set();
     const next = [];
-    for (const row of data || []) {
-      if (!row.series || row.series.is_hidden) continue;
+    for (const row of rows) {
+      if (row.series.is_hidden) continue;
       const key = (row.from_user || "") + "|" + seriesKey(row.series);
       if (seen.has(key)) continue;
       seen.add(key);
-      next.push(row);
+      next.push({
+        ...row,
+        series: { ...row.series, note: notes.get(row.series.id) || "" }
+      });
     }
     setRecs(next);
   };
@@ -397,15 +515,134 @@ export default function Tracker({ user, dark, setDark, th }) {
       });
   })();
   const sendRec = async (uid) => {
-    const { error } = await sb
+    const { data, error } = await sb
       .from("recommendations")
-      .insert({ to_user: uid, series_id: recFor.id });
+      .insert({ to_user: uid, series_id: recFor.id })
+      .select()
+      .single();
     if (error && !isUniqueViolation(error)) {
       console.error("Sending recommendation failed:", error);
       say("Could not send that recommendation. Please try again.");
       return false;
     }
+    if (data) {
+      setSentRecs((rows) => [
+        ...rows.filter(
+          (row) => !(row.to_user === uid && row.series_id === recFor.id)
+        ),
+        data
+      ]);
+    }
     return true;
+  };
+  const withdrawSent = async (ids) => {
+    const clean = [...new Set((ids || []).filter(Boolean))];
+    if (!clean.length) return;
+    const before = sentRecs;
+    setSentRecs((rows) => rows.filter((row) => !clean.includes(row.id)));
+    const { error } = await sb.from("recommendations").delete().in("id", clean);
+    if (error) {
+      console.error("Withdrawing recommendation failed:", error);
+      setSentRecs(before);
+      say("Could not withdraw that recommendation. Please try again.");
+    }
+  };
+  const sentFor = (series) =>
+    !series?.id
+      ? []
+      : sentRecs
+          .filter((row) => row.series_id === series.id)
+          .map((row) => ({
+            ...row,
+            uid: row.to_user,
+            name: fp[row.to_user]?.display_name || "Friend"
+          }));
+  const translatorRowsFor = (series) => {
+    if (!series) return [];
+    const seen = new Set();
+    return trecs
+      .filter((row) => {
+        if (!row.series || seen.has(row.id)) return false;
+        const match = row.series_id === series.id || same(row.series, series);
+        if (match) seen.add(row.id);
+        return match;
+      })
+      .map((row) => ({
+        ...row,
+        mine: row.user_id === user.id,
+        ownerName:
+          row.user_id === user.id
+            ? "You"
+            : fp[row.user_id]?.display_name || "A friend",
+        ownerAvatar:
+          row.user_id === user.id
+            ? prof.avatar_url
+            : fp[row.user_id]?.avatar_url
+      }));
+  };
+  const saveTranslator = async (payload) => {
+    const name = String(payload.name || "").trim();
+    const link = httpUrl(payload.link);
+    if (!name) {
+      say("Add a translator or group name.");
+      return false;
+    }
+    if (!link) {
+      say("Enter an http:// or https:// link.");
+      return false;
+    }
+    if (!["Official license", "Fan translation"].includes(payload.type)) {
+      say("Choose Official license or Fan translation.");
+      return false;
+    }
+    const row = {
+      series_id: payload.seriesId,
+      user_id: user.id,
+      name,
+      language: String(payload.language || "English").trim() || "English",
+      type: payload.type,
+      link,
+      note: String(payload.note || "").slice(0, 500)
+    };
+    const { error } = payload.id
+      ? await sb
+          .from("translator_recs")
+          .update(row)
+          .eq("id", payload.id)
+          .eq("user_id", user.id)
+      : await sb.from("translator_recs").insert(row);
+    if (error) {
+      console.error("Saving translator recommendation failed:", error);
+      say(
+        isUniqueViolation(error)
+          ? "A translator with that name is already listed for this series."
+          : "Could not save that translator recommendation. Please try again."
+      );
+      return false;
+    }
+    await loadFriends();
+    say(
+      payload.id
+        ? "Translator recommendation updated"
+        : "Translator recommendation added"
+    );
+    return true;
+  };
+  const deleteTranslator = async (row) => {
+    const before = trecs;
+    setTrecs((rows) => rows.filter((x) => x.id !== row.id));
+    const { error } = await sb
+      .from("translator_recs")
+      .delete()
+      .eq("id", row.id)
+      .eq("user_id", user.id);
+    if (error) {
+      console.error("Deleting translator recommendation failed:", error);
+      setTrecs(before);
+      say("Could not remove that translator recommendation. Please try again.");
+      return;
+    }
+    say("Translator recommendation removed");
   };
   const addRec = async (r, name) => {
     say("Adding…");
@@ -421,7 +658,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       anilist_id: x.anilist_id,
       pub_status: x.pub_status,
       total_chapters: x.total_chapters,
-      read_url: x.read_url
+      read_url: ""
     };
     const dup = await findExistingSeries(user.id, row, items);
     if (dup) {
@@ -436,7 +673,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         source: "Recommended by " + name,
         position: Math.max(-1, ...items.map((i) => i.position)) + 1
       })
-      .select()
+      .select("id")
       .single();
     if (error) {
       if (isUniqueViolation(error)) {
@@ -488,7 +725,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       anilist_id: source.anilist_id ?? null,
       pub_status: source.pub_status || "",
       total_chapters: source.total_chapters ?? null,
-      read_url: source.read_url || null
+      read_url: ""
     };
     const dup = await findExistingSeries(user.id, row, items);
     if (dup) {
@@ -506,7 +743,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         source: "From " + (friend.name || "a friend") + " list",
         position: Math.max(-1, ...items.map((i) => i.position)) + 1
       })
-      .select()
+      .select("id")
       .single();
     if (error) {
       if (isUniqueViolation(error)) {
@@ -677,7 +914,7 @@ export default function Tracker({ user, dark, setDark, th }) {
     say("Importing…");
     const { data: fresh, error: readError } = await sb
       .from("series")
-      .select("*")
+      .select(SERIES_COLUMNS)
       .eq("user_id", user.id);
     if (readError) console.error("Loading your list before import failed:", readError);
     const have = [...(fresh || items)];
@@ -936,6 +1173,9 @@ export default function Tracker({ user, dark, setDark, th }) {
                   s={s}
                   fr={friendHas(s)}
                   onOpen={setOpen}
+                  outgoing={sentFor(s)}
+                  onWithdraw={withdrawSent}
+                  translatorCount={translatorRowsFor(s).length}
                   drag={
                     canDrag
                       ? {
@@ -964,6 +1204,12 @@ export default function Tracker({ user, dark, setDark, th }) {
           onShare={(s) => link(s.id)}
           onRecommend={(s) => setRecFor(s)}
           notify={say}
+          custom={customOptions}
+          outgoing={sentFor(open)}
+          onWithdrawSent={withdrawSent}
+          translatorRecs={translatorRowsFor(open)}
+          onSaveTranslator={saveTranslator}
+          onDeleteTranslator={deleteTranslator}
         />
       )}
       {friendOpen && friendLive && (
@@ -989,6 +1235,7 @@ export default function Tracker({ user, dark, setDark, th }) {
               row.from_user === friendOpen.friend.uid &&
               same(row.series, friendLive)
           )}
+          translatorRecs={translatorRowsFor(friendLive)}
           onAdd={(series) =>
             setAddFor({ series, friend: friendOpen.friend })
           }
@@ -1020,7 +1267,9 @@ export default function Tracker({ user, dark, setDark, th }) {
         <RecModal
           series={recFor}
           friends={friendList}
+          sent={sentFor(recFor)}
           onSend={sendRec}
+          onWithdraw={withdrawSent}
           onClose={() => setRecFor(null)}
         />
       )}

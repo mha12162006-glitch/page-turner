@@ -113,7 +113,6 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
             status: y.status,
             rating: y.rating,
             review: y.review,
-            notes: y.notes,
             priority: y.priority,
             chapter: y.chapter,
             total: y.total_chapters
@@ -163,7 +162,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
         source: "From " + (who.display_name || "a friend") + " list",
         position: mine.reduce((m, i) => Math.max(m, i.position), -1) + 1
       })
-      .select()
+      .select("id")
       .single();
     if (error) {
       if (isUniqueViolation(error)) {

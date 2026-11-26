@@ -2,13 +2,30 @@ import { useState } from "react";
 import { splitTags, joinTags } from "../lib/tags";
 
 const same = (a, b) =>
-  String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  String(a || "")
+    .trim()
+    .toLowerCase() ===
+  String(b || "")
+    .trim()
+    .toLowerCase();
+
+const unique = (list) => {
+  const out = [];
+  for (const label of list || []) {
+    const clean = String(label || "").trim();
+    if (clean && !out.some((x) => same(x, clean))) out.push(clean);
+  }
+  return out;
+};
 
 export default function ChipPicker({
   title,
   presets = [],
+  customPresets = [],
   value = "",
   onChange,
+  onAddCustom,
+  onRemoveCustom,
   readOnly = false,
   allowAdd = true,
   placeholder = "Add a custom tag",
@@ -18,10 +35,17 @@ export default function ChipPicker({
 }) {
   const [draft, setDraft] = useState("");
   const values = splitTags(value);
-  const custom = values.filter(
-    (item) => !presets.some((preset) => same(preset, item))
+  const builtins = unique(presets);
+  const savedCustom = unique(customPresets).filter(
+    (label) => !builtins.some((preset) => same(preset, label))
   );
-  const all = [...presets, ...custom];
+  const currentCustom = values.filter(
+    (label) =>
+      !builtins.some((preset) => same(preset, label)) &&
+      !savedCustom.some((preset) => same(preset, label))
+  );
+  const all = [...builtins, ...savedCustom, ...currentCustom];
+  const deletable = [...savedCustom, ...currentCustom];
   const selected = (label) => values.some((item) => same(item, label));
   const toggle = (label) => {
     if (readOnly) return;
@@ -34,8 +58,15 @@ export default function ChipPicker({
     event.preventDefault();
     const label = draft.trim();
     if (!label) return;
+    onAddCustom?.(label);
     if (!selected(label)) onChange(joinTags([...values, label]));
     setDraft("");
+  };
+  const removeCustom = (label) => {
+    onRemoveCustom?.(label);
+    if (selected(label)) {
+      onChange(joinTags(values.filter((item) => !same(item, label))));
+    }
   };
   return (
     <section className="space-y-2">
@@ -50,33 +81,49 @@ export default function ChipPicker({
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {all.map((label) => {
           const on = selected(label);
+          const canDelete = !readOnly && !!onRemoveCustom && deletable.some((x) => same(x, label));
           return (
-            <button
+            <div
               key={label}
-              type="button"
-              aria-pressed={on}
-              disabled={readOnly}
-              onClick={() => toggle(label)}
               className={
-                "rounded-xl border px-3 py-2 text-left text-sm font-semibold transition " +
+                "flex items-center rounded-xl border transition " +
                 (on
                   ? "border-plum bg-plum text-white shadow-sm "
-                  : "border-plum/20 bg-plum/10 hover:bg-plum/15 ") +
+                  : "border-plum/20 bg-plum/10 ") +
                 (readOnly ? "cursor-default" : "")
               }
             >
-              <span className="flex items-center gap-1.5">
-                <span className="min-w-0 flex-1 break-words">{label}</span>
-                {on && <span aria-hidden>✓</span>}
-              </span>
-            </button>
+              <button
+                type="button"
+                aria-pressed={on}
+                disabled={readOnly}
+                onClick={() => toggle(label)}
+                className="min-w-0 flex-1 px-3 py-2 text-left text-sm font-semibold disabled:cursor-default"
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 break-words">{label}</span>
+                  {on && <span aria-hidden>✓</span>}
+                </span>
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  aria-label={"Remove custom " + label}
+                  title="Remove custom option"
+                  onClick={() => removeCustom(label)}
+                  className="mr-1.5 grid h-6 w-6 shrink-0 place-items-center rounded-full text-sm font-bold opacity-60 transition hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+                >
+                  ×
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
       {hint && values.length === 0 && (
         <p className="text-xs opacity-60">{hint}</p>
       )}
-      {allowAdd && !readOnly && (
+      {allowAdd && !readOnly && onAddCustom && (
         <form onSubmit={add} className="flex gap-2">
           <input
             className="inp"

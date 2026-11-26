@@ -1,66 +1,81 @@
-import { describe, expect, it } from "vitest";
-import { officialReadUrl } from "./anilist";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { enrich, needsEnrichment, searchAniList } from "./anilist";
 
-describe("officialReadUrl", () => {
-  it("picks an official streaming platform, preferring the requested order", () => {
-    const url = officialReadUrl([
-      {
-        url: "https://page.kakao.com/content/1",
-        type: "STREAMING",
-        site: "KakaoPage"
-      },
-      {
-        url: "https://tapas.io/series/example",
-        type: "STREAMING",
-        site: "Tapas"
-      },
-      {
-        url: "https://www.tappytoon.com/en/book/example",
-        type: "STREAMING",
-        site: "Tappytoon"
-      }
-    ]);
-    expect(url).toBe("https://tapas.io/series/example");
+const media = {
+  id: 42,
+  title: { romaji: "Example", english: "Example" },
+  coverImage: { large: "" },
+  countryOfOrigin: "KR",
+  genres: ["Action"],
+  tags: [],
+  description: "A synopsis.",
+  status: "RELEASING",
+  externalLinks: [
+    {
+      url: "https://tapas.io/series/example",
+      type: "STREAMING",
+      site: "Tapas"
+    }
+  ],
+  characters: { nodes: [] }
+};
+
+const response = {
+  ok: true,
+  status: 200,
+  json: async () => ({
+    data: { Page: { media: [media] }, Media: { ...media, chapters: 100 } }
+  })
+};
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ...response })));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("AniList reading links", () => {
+  it("never puts a link into search results", async () => {
+    const rows = await searchAniList("Example");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].read_url ?? "").toBe("");
+    expect(Object.hasOwn(rows[0], "read_url")).toBe(false);
   });
 
-  it("falls back to the explicit Official Site link", () => {
-    expect(
-      officialReadUrl([
-        {
-          url: "https://publisher.example/series",
-          type: "INFO",
-          site: "Official Site"
-        }
-      ])
-    ).toBe("https://publisher.example/series");
+  it("never fills a blank link during enrichment", async () => {
+    const { row } = await enrich({
+      title: "Example",
+      synopsis: "",
+      genres: [],
+      warnings: "",
+      read_url: ""
+    });
+    expect(row.read_url).toBe("");
   });
 
-  it("never returns an unofficial aggregator or scanlation site", () => {
-    expect(
-      officialReadUrl([
-        {
-          url: "https://mangadex.org/title/example",
-          type: "STREAMING",
-          site: "MangaDex"
-        },
-        {
-          url: "https://scanlation.example/series",
-          type: "INFO",
-          site: "Some Scanlation"
-        }
-      ])
-    ).toBe("");
+  it("keeps a link typed by the owner", async () => {
+    const mine = "https://example.com/my-link";
+    const { row } = await enrich({
+      title: "Example",
+      anilist_id: 42,
+      synopsis: "A synopsis.",
+      genres: ["Action"],
+      warnings: "Violence",
+      read_url: mine
+    });
+    expect(row.read_url).toBe(mine);
   });
 
-  it("rejects a trusted site name when its domain is not the official one", () => {
+  it("does not enrich only because the reading link is blank", () => {
     expect(
-      officialReadUrl([
-        {
-          url: "https://mirror.example/tapas",
-          type: "STREAMING",
-          site: "Tapas"
-        }
-      ])
-    ).toBe("");
+      needsEnrichment({
+        synopsis: "A synopsis.",
+        genres: ["Action"],
+        warnings: "Violence",
+        read_url: ""
+      })
+    ).toBe(false);
   });
 });

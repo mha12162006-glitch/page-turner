@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { anilistDetail, searchAniList } from "../lib/anilist";
+import { forgetCustom, rememberCustom } from "../lib/customPresets";
 import { GENRE_PRESETS, joinTags, splitTags, TROPE_PRESETS } from "../lib/tags";
 import {
   arr,
@@ -26,6 +27,7 @@ import ChipPicker from "./ChipPicker";
 import { FriendLine } from "./Card";
 import SpoilerText from "./SpoilerText";
 import Stars from "./Stars";
+import TranslatorRecs from "./TranslatorRecs";
 
 const L = ({ t, children }) => (
   <label className="block">
@@ -35,6 +37,13 @@ const L = ({ t, children }) => (
 );
 
 const hasText = (value) => !!String(value ?? "").trim();
+const sameLabel = (a, b) =>
+  String(a || "")
+    .trim()
+    .toLowerCase() ===
+  String(b || "")
+    .trim()
+    .toLowerCase();
 
 function mergeMissing(row, data) {
   if (!data) return row;
@@ -59,9 +68,6 @@ function mergeMissing(row, data) {
   }
   if (next.total_chapters == null && data.total_chapters != null) {
     next.total_chapters = data.total_chapters;
-  }
-  if (!hasText(next.read_url) && hasText(data.read_url)) {
-    next.read_url = data.read_url;
   }
   return next;
 }
@@ -107,7 +113,13 @@ export default function Drawer({
   fr,
   chars0,
   thoughts,
-  notify
+  notify,
+  custom,
+  outgoing = [],
+  onWithdrawSent,
+  translatorRecs = [],
+  onSaveTranslator,
+  onDeleteTranslator
 }) {
   const isNew = !item.id;
   const mineEntry = (mine || []).find((row) => same(row, item));
@@ -115,6 +127,8 @@ export default function Drawer({
     ...blank,
     ...item,
     is_hidden: !!item.is_hidden,
+    note: item.note || "",
+    note_shared: item.note_shared !== false,
     genres: joinTags(item.genres),
     tags: joinTags(item.tags),
     warnings: joinWarnings(item.warnings),
@@ -133,6 +147,49 @@ export default function Drawer({
     fRef.current = f;
   }, [f]);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const initialCustom = () => ({
+    warnings: custom?.warnings || [],
+    genres: custom?.genres || [],
+    tags: custom?.tags || []
+  });
+  const [localCustom, setLocalCustom] = useState(initialCustom);
+  useEffect(() => {
+    setLocalCustom(initialCustom());
+  }, [custom?.warnings, custom?.genres, custom?.tags]);
+  const customWarnings = localCustom.warnings;
+  const customGenres = localCustom.genres;
+  const customTags = localCustom.tags;
+  const addCustom = (kind, label) => {
+    if (!rememberCustom(kind, label)) return;
+    setLocalCustom((prev) => ({
+      ...prev,
+      [kind]: [...prev[kind].filter((x) => !sameLabel(x, label)), label]
+    }));
+  };
+  const removeCustom = (kind, label) => {
+    forgetCustom(kind, label);
+    setLocalCustom((prev) => ({
+      ...prev,
+      [kind]: prev[kind].filter((x) => !sameLabel(x, label))
+    }));
+    if (kind === "warnings") {
+      set(
+        "warnings",
+        joinWarnings(
+          parseWarnings(fRef.current.warnings).filter((x) => !sameLabel(x, label))
+        )
+      );
+      setWarnTouched(true);
+      return;
+    }
+    const field = kind === "genres" ? "genres" : "tags";
+    set(
+      field,
+      joinTags(
+        splitTags(fRef.current[field]).filter((x) => !sameLabel(x, label))
+      )
+    );
+  };
   const markAutoWarnings = (value) => {
     const clean = joinWarnings(value);
     if (!clean) return;
@@ -519,11 +576,7 @@ export default function Drawer({
           <div className="flex gap-2">
             <input
               className="inp"
-              placeholder={
-                readOnly
-                  ? ""
-                  : "Paste a link, or it is filled in when AniList lists an official source"
-              }
+              placeholder={readOnly ? "" : "Paste your own http(s) link"}
               value={f.read_url || ""}
               disabled={readOnly}
               onChange={(e) => set("read_url", e.target.value)}
@@ -565,11 +618,14 @@ export default function Drawer({
         <ChipPicker
           title="Content / trigger warnings"
           presets={WARNING_PRESETS}
+          customPresets={customWarnings}
           value={f.warnings || ""}
           readOnly={readOnly}
           allowAdd={!readOnly}
           placeholder="+ Add custom warning"
           addLabel="Add"
+          onAddCustom={(label) => addCustom("warnings", label)}
+          onRemoveCustom={(label) => removeCustom("warnings", label)}
           hint={
             readOnly
               ? ""
@@ -590,19 +646,27 @@ export default function Drawer({
         <ChipPicker
           title="Genres"
           presets={GENRE_PRESETS}
+          customPresets={customGenres}
           value={f.genres || ""}
           readOnly={readOnly}
-          allowAdd={false}
+          allowAdd={!readOnly}
+          placeholder="+ Add custom genre"
+          addLabel="Add"
+          onAddCustom={(label) => addCustom("genres", label)}
+          onRemoveCustom={(label) => removeCustom("genres", label)}
           onChange={(value) => set("genres", value)}
         />
         <ChipPicker
           title="Tropes & tags"
           presets={TROPE_PRESETS}
+          customPresets={customTags}
           value={f.tags || ""}
           readOnly={readOnly}
           allowAdd={!readOnly}
           placeholder="+ Add custom tag"
           addLabel="Add"
+          onAddCustom={(label) => addCustom("tags", label)}
+          onRemoveCustom={(label) => removeCustom("tags", label)}
           onChange={(value) => set("tags", value)}
         />
         {!readOnly && (
@@ -674,6 +738,32 @@ export default function Drawer({
             ))}
           </div>
         )}
+        {!readOnly && outgoing.length > 0 && (
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-2">
+            <p className="font-bold">💌 Sent recommendations</p>
+            {outgoing.map((row) => (
+              <div
+                key={row.id}
+                className="flex items-center gap-2 rounded-xl bg-white/70 dark:bg-white/5 px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 flex-1 font-semibold">
+                  Recommended to {row.name}
+                </span>
+                {onWithdrawSent && (
+                  <button
+                    type="button"
+                    aria-label={"Withdraw recommendation to " + row.name}
+                    title="Withdraw recommendation"
+                    onClick={() => onWithdrawSent([row.id])}
+                    className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-plum/15 font-bold hover:bg-plum/25"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {readOnly && recommendations && recommendations.length > 0 && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
             <p className="font-bold">💌 Translator recommendation</p>
@@ -682,6 +772,14 @@ export default function Drawer({
             </p>
           </div>
         )}
+        <TranslatorRecs
+          rows={translatorRecs}
+          seriesId={item.id}
+          readOnly={readOnly}
+          onSave={onSaveTranslator}
+          onDelete={onDeleteTranslator}
+          notify={notice}
+        />
         {readOnly && friendView && f.source && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
             <p className="font-bold">🔎 Found via</p>
@@ -690,23 +788,59 @@ export default function Drawer({
             </p>
           </div>
         )}
-        {readOnly && friendView && f.notes && (
+        {readOnly && friendView && f.note && f.note_shared !== false && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-1">
             <p className="font-bold">📝 Footnote</p>
             <p className="text-sm break-words whitespace-pre-line">
-              {f.notes}
+              {f.note}
             </p>
           </div>
         )}
         {!readOnly && (
-          <L t="Personal notes / footnotes">
-            <Auto
-              className="inp"
-              rows={3}
-              value={f.notes || ""}
-              onChange={(e) => set("notes", e.target.value)}
-            />
-          </L>
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-3">
+            <div>
+              <p className="font-bold">📝 Footnote</p>
+              <p className="text-xs opacity-70">
+                A note for this series. Keep it private or share it with
+                friends.
+              </p>
+            </div>
+            <L t="Footnote">
+              <Auto
+                className="inp"
+                rows={3}
+                value={f.note || ""}
+                onChange={(e) => set("note", e.target.value)}
+              />
+            </L>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="font-bold">Visible to friends</p>
+                <p className="text-xs opacity-70">
+                  Shared footnotes appear on your friend card and in the
+                  read-only details. Public share links never show footnotes.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={!!f.note_shared}
+                aria-label="Visible to friends"
+                onClick={() => set("note_shared", !f.note_shared)}
+                className={
+                  "relative h-6 w-11 shrink-0 rounded-full transition " +
+                  (f.note_shared ? "bg-plum" : "bg-plum/25")
+                }
+              >
+                <span
+                  className={
+                    "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition " +
+                    (f.note_shared ? "translate-x-5" : "")
+                  }
+                />
+              </button>
+            </div>
+          </div>
         )}
         <div
           className={

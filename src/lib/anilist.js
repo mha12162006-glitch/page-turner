@@ -1,4 +1,4 @@
-import { isHttp, norm } from "./util";
+import { norm } from "./util";
 import { mapTagsToWarnings, parseWarnings } from "./warnings";
 import { mapGenres, mapTropes } from "./tags";
 
@@ -19,13 +19,13 @@ const SEARCH_QUERY = [
   "query($s:String){Page(perPage:8){media(search:$s,type:MANGA,",
   "sort:SEARCH_MATCH){id title{romaji english} coverImage{large}",
   " countryOfOrigin genres isAdult tags{name rank isMediaSpoiler} ",
-  "description(asHtml:false) status externalLinks{url type site}}}}"
+  "description(asHtml:false) status}}}}"
 ].join("");
 
 const DETAIL_QUERY = [
   "query($id:Int){Media(id:$id){chapters status ",
   "description(asHtml:false) genres isAdult ",
-  "tags{name rank isMediaSpoiler} externalLinks{url type site} ",
+  "tags{name rank isMediaSpoiler} ",
   "characters(role:MAIN,perPage:8){nodes{name{full} image{large}}}}}"
 ].join("");
 
@@ -97,57 +97,6 @@ async function anilistQuery(query, variables) {
   }
 }
 
-// Only the official reading platforms named in the Stage 3 brief, in the
-// given order, then AniList's explicit "Official Site" link. Aggregators and
-// scanlation sites are never selected.
-const PLATFORMS = [
-  ["WEBTOON", /^webtoons?$/i, /(^|\.)webtoons\.com$/i],
-  ["Tapas", /^tapas$/i, /(^|\.)tapas\.io$/i],
-  ["Tappytoon", /^tappytoon$/i, /(^|\.)tappytoon\.com$/i],
-  ["Lezhin", /^lezhin$/i, /(^|\.)lezhin\.com$/i],
-  ["KakaoPage", /^kakaopage$/i, /(^|\.)page\.kakao\.com$/i],
-  ["Naver Series", /^naver series$/i, /(^|\.)series\.naver\.com$/i],
-  ["Manta", /^manta$/i, /(^|\.)manta\.net$/i],
-  ["Comikey", /^comikey$/i, /(^|\.)comikey\.com$/i],
-  [
-    "MANGA Plus",
-    /^manga plus$/i,
-    /(^|\.)(mangaplus\.shueisha\.co\.jp|mangaplus\.com)$/i
-  ]
-];
-
-const hostOf = (url) => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-};
-
-export function officialReadUrl(links = []) {
-  const rows = (Array.isArray(links) ? links : []).filter(
-    (link) => link && isHttp(link.url)
-  );
-  const streaming = [];
-  for (const link of rows) {
-    if (link.type !== "STREAMING") continue;
-    const site = String(link.site || "").trim();
-    const host = hostOf(link.url);
-    const index = PLATFORMS.findIndex(
-      ([, siteRe, hostRe]) => siteRe.test(site) && hostRe.test(host)
-    );
-    if (index >= 0) streaming.push({ link, index });
-  }
-  if (streaming.length) {
-    streaming.sort((a, b) => a.index - b.index);
-    return streaming[0].link.url.trim();
-  }
-  const official = rows.find((link) =>
-    /^official site$/i.test(String(link.site || "").trim())
-  );
-  return official ? official.url.trim() : "";
-}
-
 const tagList = (media) => (Array.isArray(media.tags) ? media.tags : []);
 const genreList = (media) => (Array.isArray(media.genres) ? media.genres : []);
 
@@ -178,7 +127,6 @@ export async function searchAniList(q) {
       genres: mapGenres(genres),
       tags: mapTropes(tags),
       warnings: mapTagsToWarnings(tags, genres, !!m.isAdult).join(", "),
-      read_url: officialReadUrl(m.externalLinks),
       synopsis: cleanSyn(m.description)
     };
   });
@@ -199,7 +147,6 @@ export async function anilistDetail(id) {
     tags: mapTropes(tags),
     warnings: mapTagsToWarnings(tags, genres, !!m.isAdult).join(", "),
     total_chapters: m.status === "FINISHED" ? m.chapters || null : null,
-    read_url: officialReadUrl(m.externalLinks),
     chars: (m.characters?.nodes || []).map((n) => ({
       name: n.name.full,
       image_url: n.image?.large || "",
@@ -215,8 +162,7 @@ const hasList = (value) =>
 export const needsEnrichment = (row = {}) =>
   !hasText(row.synopsis) ||
   !hasList(row.genres) ||
-  !parseWarnings(row.warnings).length ||
-  !hasText(row.read_url);
+  !parseWarnings(row.warnings).length;
 
 function fillMissing(row, source) {
   if (!source) return row;
@@ -244,16 +190,13 @@ function fillMissing(row, source) {
   if (r.total_chapters == null && source.total_chapters != null) {
     r.total_chapters = source.total_chapters;
   }
-  if (!hasText(r.read_url) && hasText(source.read_url)) {
-    r.read_url = source.read_url;
-  }
   return r;
 }
 
 /**
- * Fill only missing fields. Existing selected genres, tags, warnings and URLs
- * are never overwritten. A failed lookup is announced through the AniList
- * notice event, but it returns the original row so a series save still works.
+ * Fill only missing details. "Link to read" is intentionally never filled;
+ * it stays blank until the owner types a URL. A failed lookup is announced
+ * through the AniList notice event, but the row stays saveable.
  */
 export async function enrich(base) {
   let row = { ...base };

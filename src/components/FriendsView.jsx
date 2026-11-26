@@ -56,7 +56,7 @@ export default function FriendsView({
         status: own.status,
         rating: own.rating,
         review: own.review,
-        notes: own.notes,
+        note: own.note,
         priority: own.priority,
         chapter: own.chapter,
         total: own.total_chapters
@@ -71,7 +71,7 @@ export default function FriendsView({
         status: row.status,
         rating: row.rating,
         review: row.review,
-        notes: row.notes,
+        note: row.note,
         priority: row.priority,
         chapter: row.chapter,
         total: row.total_chapters
@@ -192,6 +192,7 @@ export default function FriendsView({
               key={row.id}
               s={row}
               readOnly
+              showNote
               fr={whoElse(row)}
               onAdd={onAdd ? (target) => onAdd(target, friend) : undefined}
               onOpen={(target) => onOpenFriend?.(target, friend)}

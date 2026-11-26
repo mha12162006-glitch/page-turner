@@ -38,7 +38,6 @@ export const blank = {
   media: [],
   tags: [],
   warnings: "",
-  notes: "",
   rating: null,
   review: "",
   pub_status: "",
@@ -172,7 +171,6 @@ export function malImport(xml, uid) {
         format: "Manga",
         status: st,
         rating: st === "done" && sc > 0 ? sc : null,
-        notes: g("my_comments") || null,
         tags: held ? ["MAL: On-Hold"] : drop ? ["MAL: Dropped"] : [],
         position: i
       };

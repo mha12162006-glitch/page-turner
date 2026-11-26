@@ -140,7 +140,7 @@ export function friendsWhoHave(target, friendRows = [], profiles = {}) {
       status: row.status,
       rating: row.rating,
       review: row.review,
-      notes: row.notes,
+      note: row.note,
       priority: row.priority,
       chapter: row.chapter,
       total: row.total_chapters,

@@ -31,16 +31,27 @@ export function FriendLine({ x, showName = true }) {
           </p>
         </details>
       )}
-      {x.notes && (
+      {x.note && (
         <p className="italic opacity-70 break-words whitespace-pre-line">
-          “{x.notes}”
+          “{x.note}”
         </p>
       )}
     </div>
   );
 }
 
-export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
+export default function Card({
+  s,
+  onOpen,
+  drag,
+  readOnly,
+  fr,
+  onAdd,
+  showNote = !readOnly,
+  outgoing = [],
+  onWithdraw,
+  translatorCount = 0
+}) {
   const mine = (fr || []).find((x) => x.isMe === true);
   return (
     <article
@@ -84,6 +95,17 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             title="Hidden from friends"
           >
             🔒 Hidden
+          </span>
+        )}
+        {translatorCount > 0 && (
+          <span
+            className="absolute bottom-2 right-2 rounded-full bg-black/70 px-2 py-0.5 text-xs font-bold text-white"
+            aria-label={
+              translatorCount + " translator recommendations"
+            }
+            title="Translator recommendations"
+          >
+            🌐 {translatorCount}
           </span>
         )}
       </div>
@@ -139,6 +161,27 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             + Add to my list
           </button>
         ) : null}
+        {outgoing.length > 0 && !readOnly && (
+          <div
+            className="mt-2 flex items-center gap-1 rounded-full bg-plum/15 px-2 py-1 text-xs font-bold text-plum"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="min-w-0 flex-1 truncate">
+              💌 Recommended to {outgoing.map((r) => r.name).join(", ")}
+            </span>
+            {onWithdraw && (
+              <button
+                type="button"
+                aria-label={"Withdraw recommendations for " + s.title}
+                title="Withdraw recommendation"
+                onClick={() => onWithdraw(outgoing.map((r) => r.id))}
+                className="grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-plum/20"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        )}
         <div className="mt-1 flex items-center justify-between">
           <Stars v={s.excitement} size="text-sm" />
           {["done", "hiatus", "dropped"].includes(s.status) &&
@@ -168,9 +211,9 @@ export default function Card({ s, onOpen, drag, readOnly, fr, onAdd }) {
             </p>
           </details>
         )}
-        {s.notes && (
+        {showNote && s.note && (
           <p className="mt-2 text-xs italic opacity-70 break-words whitespace-pre-line">
-            “{s.notes}”
+            “{s.note}”
           </p>
         )}
       </div>

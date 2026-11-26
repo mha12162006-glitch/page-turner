@@ -23,8 +23,40 @@ export const isUniqueViolation = (error) =>
   /duplicate key|unique constraint|already exists/i.test(error?.message || "");
 
 /**
+ * Normal list reads. Footnote text lives in public.series_notes, so the legacy
+ * public.series.notes column is deliberately not selected anywhere.
+ */
+export const SERIES_COLUMNS = [
+  "id",
+  "user_id",
+  "title",
+  "cover_url",
+  "format",
+  "genres",
+  "synopsis",
+  "status",
+  "excitement",
+  "priority",
+  "source",
+  "media",
+  "tags",
+  "warnings",
+  "rating",
+  "review",
+  "position",
+  "anilist_id",
+  "created_at",
+  "pub_status",
+  "chapter",
+  "total_chapters",
+  "read_url",
+  "is_hidden",
+  "updated_at"
+].join(",");
+
+/**
  * Public share pages only need these columns. Keeping the list explicit means
- * private fields such as notes, source and moodboard are never fetched.
+ * private fields such as footnotes, source and moodboard are never fetched.
  */
 export const SHARED_SERIES_COLUMNS = [
   "id",
@@ -56,7 +88,7 @@ export async function findExistingSeries(userId, candidate, known = []) {
   if (!userId) return null;
   const { data, error } = await sb
     .from("series")
-    .select("*")
+    .select(SERIES_COLUMNS)
     .eq("user_id", userId);
   if (error) return null;
   return (data || []).find((x) => same(x, candidate)) || null;
