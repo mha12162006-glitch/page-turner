@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { anilistAllChars, searchAniList } from "../lib/anilist";
+import { anilistAllChars } from "../lib/anilist";
 import { norm } from "../lib/util";
 import SpoilerText from "./SpoilerText";
 
@@ -8,8 +8,7 @@ export default function CharSection({
   setChars,
   readOnly,
   thoughts,
-  anilistId,
-  title
+  anilistId
 }) {
   const [adding, setAdding] = useState(false);
   const [nm, setNm] = useState("");
@@ -20,13 +19,15 @@ export default function CharSection({
     if (!adding || pool) return;
     setLook(true);
     (async () => {
+      if (!anilistId) {
+        // MangaUpdates/Kitsu/manual comics have no AniList character pool.
+        console.warn("Skipping AniList characters: no anilist_id on this series.");
+        setPool([]);
+        setLook(false);
+        return;
+      }
       try {
-        let id = anilistId;
-        if (!id) {
-          const m = (await searchAniList(title))[0];
-          id = m && m.anilist_id;
-        }
-        setPool(id ? await anilistAllChars(id) : []);
+        setPool(await anilistAllChars(anilistId));
       } catch (e) {
         setPool([]);
       }
@@ -110,7 +111,7 @@ export default function CharSection({
           ))}
           {nm.trim().length > 1 && !look && pool && matches.length === 0 && (
             <p className="text-xs opacity-60">
-              No AniList match for that name — you can still add it by hand.
+              No characters found — you can still add one by hand.
             </p>
           )}
           <input

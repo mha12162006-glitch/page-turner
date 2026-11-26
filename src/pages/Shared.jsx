@@ -31,13 +31,6 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(""), 3000);
   };
-  useEffect(() => {
-    const onNotice = (event) => {
-      say(event.detail?.message || "AniList did not respond. Try again.");
-    };
-    window.addEventListener("anilist:notice", onNotice);
-    return () => window.removeEventListener("anilist:notice", onNotice);
-  }, []);
   const loadAll = async () => {
     sb.from("profiles")
       .select("display_name,avatar_url,bio")

@@ -144,13 +144,6 @@ export default function Tracker({ user, dark, setDark, th }) {
     toastTimer.current = setTimeout(() => setToast(""), 3000);
   };
   useEffect(() => {
-    const onNotice = (event) => {
-      say(event.detail?.message || "AniList did not respond. Try again.");
-    };
-    window.addEventListener("anilist:notice", onNotice);
-    return () => window.removeEventListener("anilist:notice", onNotice);
-  }, []);
-  useEffect(() => {
     const timer = setTimeout(() => setDebouncedQ(gq.trim()), 250);
     return () => clearTimeout(timer);
   }, [gq]);
@@ -208,6 +201,8 @@ export default function Tracker({ user, dark, setDark, th }) {
       say("Filling in details…");
       const e = await enrich(rest);
       rest = e.row;
+    } else if (needsEnrichment(rest)) {
+      console.warn("Skipping AniList enrichment: series has no anilist_id.");
     }
     if (!id) {
       const dup = await findExistingSeries(user.id, rest, items);

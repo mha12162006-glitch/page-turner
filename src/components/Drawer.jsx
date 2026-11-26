@@ -252,6 +252,7 @@ export default function Drawer({
     // MangaUpdates/Kitsu rows have no AniList id: finish them from their own
     // detail endpoint instead of ever calling anilistDetail() with a null id.
     if (r.anilist_id == null || r.anilist_id === "") {
+      console.warn("Skipping AniList detail: picked series has no anilist_id.");
       const full = await completeResult(r);
       if (seq !== pickSeq.current || full === r) return;
       setF((p) => mergePick(p, full));
@@ -265,14 +266,14 @@ export default function Drawer({
       markWarningsIfNew(before, d);
       setChars((c) => (c.length ? c : d.chars));
     } catch (e) {
-      // anilist.js announces real AniList failures; keep the drawer usable.
+      // anilist.js logs real failures; keep the drawer usable.
     }
   };
   const fill = async () => {
     // No AniList id means there is no AniList detail to fetch. Manual entries
     // and non-AniList picks are already complete and stay untouched.
     if (f.anilist_id == null || f.anilist_id === "") {
-      notice("This title is not linked to AniList, so there is nothing to fill.");
+      console.warn("Skipping AniList auto-fill: no anilist_id on this series.");
       return;
     }
     setBusy(true);
@@ -286,7 +287,7 @@ export default function Drawer({
         ...d.chars.filter((x) => !c.some((y) => norm(y.name) === norm(x.name)))
       ]);
     } catch (e) {
-      // anilist.js announces real AniList failures; keep the drawer usable.
+      // anilist.js logs real failures; keep the drawer usable.
     } finally {
       setBusy(false);
     }
@@ -705,7 +706,6 @@ export default function Drawer({
           readOnly={readOnly}
           thoughts={thoughts}
           anilistId={f.anilist_id}
-          title={f.title}
         />
         {fr && fr.length > 0 && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-2">

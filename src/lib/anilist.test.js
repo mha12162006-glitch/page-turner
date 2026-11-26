@@ -34,6 +34,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("AniList reading links", () => {
@@ -56,6 +57,7 @@ describe("AniList reading links", () => {
   });
 
   it("makes no AniList request for a row without an anilist_id", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const spy = vi.fn(async () => ({ ...response }));
     vi.stubGlobal("fetch", spy);
     const base = {
@@ -67,24 +69,17 @@ describe("AniList reading links", () => {
     };
     const { row, chars } = await enrich(base);
     expect(spy).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("no anilist_id")
+    );
     expect(row).toEqual(base);
     expect(chars).toEqual([]);
   });
 
-  it("only announces a failure after a real AniList request", async () => {
-    const notices = [];
-    vi.stubGlobal("window", {
-      dispatchEvent: (event) => notices.push(event.detail)
-    });
-    vi.stubGlobal(
-      "CustomEvent",
-      class {
-        constructor(type, options) {
-          this.type = type;
-          this.detail = options.detail;
-        }
-      }
-    );
+  it("logs a real AniList failure without any user-facing notice", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dispatch = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: dispatch });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ...response, ok: false, status: 500 })));
     await enrich({
       title: "Example",
@@ -93,7 +88,10 @@ describe("AniList reading links", () => {
       genres: [],
       warnings: ""
     });
-    expect(notices.some((n) => /AniList did not respond/.test(n.message))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("AniList did not respond")
+    );
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("keeps a link typed by the owner", async () => {

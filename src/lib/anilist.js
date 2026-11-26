@@ -37,12 +37,8 @@ const CHARS_QUERY = [
 const BUSY = "AniList is busy, retrying";
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function notifyAniList(message, kind = "info") {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent("anilist:notice", { detail: { message, kind } })
-  );
-}
+/** Failures are logged only. They never become toasts, banners, or alerts. */
+const warnAniList = (message) => console.warn(message);
 
 async function anilistQuery(query, variables) {
   let retry = 0;
@@ -55,26 +51,23 @@ async function anilistQuery(query, variables) {
         body: JSON.stringify({ query, variables })
       });
     } catch (err) {
-      notifyAniList("AniList did not respond. Try again in a moment.", "error");
+      warnAniList("AniList did not respond. Try again in a moment.");
       throw err;
     }
 
     if (r.status === 429) {
       if (retry < 3) {
-        notifyAniList(BUSY, "busy");
+        warnAniList(BUSY);
         await pause(1000 * 2 ** retry);
         retry++;
         continue;
       }
-      notifyAniList(
-        "AniList is busy right now. Please try again in a minute.",
-        "error"
-      );
+      warnAniList("AniList is busy right now. Please try again in a minute.");
       throw new Error("AniList is busy (HTTP 429)");
     }
 
     if (!r.ok) {
-      notifyAniList("AniList did not respond. Try again in a moment.", "error");
+      warnAniList("AniList did not respond. Try again in a moment.");
       throw new Error("AniList request failed (HTTP " + r.status + ")");
     }
 
@@ -82,14 +75,11 @@ async function anilistQuery(query, variables) {
     try {
       json = await r.json();
     } catch (err) {
-      notifyAniList("AniList sent an unreadable response. Try again.", "error");
+      warnAniList("AniList sent an unreadable response. Try again.");
       throw err;
     }
     if (json.errors && json.errors.length) {
-      notifyAniList(
-        "AniList could not load that title. Please try again.",
-        "error"
-      );
+      warnAniList("AniList could not load that title. Please try again.");
       throw new Error(json.errors.map((e) => e.message).join("; "));
     }
     return json.data || {};
@@ -132,13 +122,16 @@ export async function searchAniList(q) {
 }
 
 export async function anilistDetail(id) {
-  // A null id means this is a MangaUpdates/Kitsu/comic row. It has no AniList
-  // detail endpoint, so never make a request or announce an AniList failure.
-  if (id == null || id === "") throw new Error("AniList id missing");
+  // A null id means this is a MangaUpdates/Kitsu/manual comic. It has no
+  // AniList endpoint, so return before any request or user-facing message.
+  if (id == null || id === "") {
+    warnAniList("Skipping AniList detail: no anilist_id on this series.");
+    return null;
+  }
   const data = await anilistQuery(DETAIL_QUERY, { id });
   const m = data.Media;
   if (!m) {
-    notifyAniList("AniList could not load that title. Try again.", "error");
+    warnAniList("AniList could not load that title. Try again.");
     throw new Error("AniList returned no title");
   }
   const tags = tagList(m);
@@ -198,24 +191,32 @@ function fillMissing(row, source) {
 /**
  * Fill only missing details for rows that already have an AniList id. Rows
  * from MangaUpdates/Kitsu (or manual entry) have no id and are left untouched:
- * no AniList request, no AniList error toast. "Link to read" is never filled.
+ * no AniList request, no toast. "Link to read" is never filled.
  */
 export async function enrich(base) {
   let row = { ...base };
   let chars = [];
   const id = row.anilist_id;
-  if (id == null || id === "") return { row, chars };
+  if (id == null || id === "") {
+    warnAniList("Skipping AniList enrichment: no anilist_id on this series.");
+    return { row, chars };
+  }
   try {
     const detail = await anilistDetail(id);
+    if (!detail) return { row, chars };
     row = fillMissing(row, detail);
     chars = detail.chars || [];
   } catch (err) {
-    // anilistQuery has already shown a message; keep the save usable.
+    // anilistQuery has already logged the failure; keep the save usable.
   }
   return { row, chars };
 }
 
 export async function anilistAllChars(id) {
+  if (id == null || id === "") {
+    warnAniList("Skipping AniList characters: no anilist_id on this series.");
+    return [];
+  }
   let out = [];
   let page = 1;
   let more = true;
