@@ -65,6 +65,7 @@ export default function Drawer({
   item,
   onClose,
   onSave,
+  onReviewSave,
   onDelete,
   onShare,
   onRecommend,
@@ -87,8 +88,11 @@ export default function Drawer({
   onDeleteTranslator
 }) {
   const isNew = !item.id;
+  // Escape/Tab are handled by useOverlay; route its close through the same
+  // review flush used by the × button and the backdrop.
+  const requestCloseRef = useRef(null);
   const panelRef = useOverlay(
-    onClose,
+    () => (requestCloseRef.current ? requestCloseRef.current() : onClose()),
     readOnly ? "Series details" : isNew ? "Add new series" : "Edit series"
   );
   const mineEntry = (mine || []).find((row) => same(row, item));
@@ -110,12 +114,41 @@ export default function Drawer({
   const [autoWarnings, setAutoWarnings] = useState("");
   const [warnTouched, setWarnTouched] = useState(false);
   const fRef = useRef(f);
+  const savedReviewRef = useRef(String(item.review ?? ""));
+  // Serialize review-only writes so blur and close cannot race each other.
+  const reviewQueueRef = useRef(Promise.resolve());
   const pickSeq = useRef(0);
   const notice = notify || (() => {});
   useEffect(() => {
     fRef.current = f;
   }, [f]);
-  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const set = (k, v) =>
+    setF((p) => {
+      const next = { ...p, [k]: v };
+      // Keep the ref in lockstep for blur/close/auto-save flushes.
+      fRef.current = next;
+      return next;
+    });
+
+  /** Flush only review text; a full drawer save still handles other fields. */
+  const flushReview = () => {
+    if (readOnly || isNew || typeof onReviewSave !== "function") {
+      return Promise.resolve();
+    }
+    const next = reviewQueueRef.current.then(async () => {
+      const latest = String(fRef.current.review ?? "");
+      if (latest === savedReviewRef.current) return;
+      const ok = await onReviewSave(item, latest);
+      if (ok !== false) savedReviewRef.current = latest;
+    });
+    reviewQueueRef.current = next.catch(() => {});
+    return next;
+  };
+  const requestClose = async () => {
+    await flushReview();
+    onClose();
+  };
+  requestCloseRef.current = requestClose;
 
   /**
    * One entry point for every source. Search rows and detail responses are
@@ -325,8 +358,15 @@ export default function Drawer({
       setBusy(false);
     }
   };
-  const save = () => {
-    if (!f.title.trim()) return alert("Add a title first.");
+  const save = async () => {
+    const current = fRef.current;
+    if (!String(current.title || "").trim()) return alert("Add a title first.");
+    // A blur auto-save may already be in flight. Let it finish so the two
+    // writes cannot race, then send the same latest text with the full form.
+    await reviewQueueRef.current;
+    const latest = fRef.current;
+    const latestReview = String(latest.review ?? "");
+    const reviewChanged = latestReview !== String(item.review ?? "");
     const {
       _source,
       _source_id,
@@ -334,22 +374,24 @@ export default function Drawer({
       _webtoon_type,
       _ageRating,
       ...form
-    } = f;
-    onSave(
+    } = latest;
+    const ok = await onSave(
       {
         ...form,
-        cover_url: httpUrl(f.cover_url) || null,
-        genres: splitTags(f.genres),
-        tags: splitTags(f.tags),
-        warnings: joinWarnings(f.warnings),
-        media: arr(f.media).map(httpUrl).filter(Boolean),
-        rating: num(f.rating),
-        chapter: num(f.chapter),
-        total_chapters: num(f.total_chapters),
-        read_url: httpUrl(f.read_url) || null
+        cover_url: httpUrl(latest.cover_url) || null,
+        genres: splitTags(latest.genres),
+        tags: splitTags(latest.tags),
+        warnings: joinWarnings(latest.warnings),
+        media: arr(latest.media).map(httpUrl).filter(Boolean),
+        rating: num(latest.rating),
+        chapter: num(latest.chapter),
+        total_chapters: num(latest.total_chapters),
+        read_url: httpUrl(latest.read_url) || null
       },
-      chars
+      chars,
+      { reviewChanged }
     );
+    if (ok !== false) savedReviewRef.current = latestReview;
   };
   const media = arr(f.media).map(httpUrl).filter(Boolean);
   const fin = ["done", "hiatus", "dropped"].includes(f.status);
@@ -358,7 +400,7 @@ export default function Drawer({
   return (
     <div
       className="fixed inset-0 z-50 flex justify-end bg-black/50"
-      onClick={onClose}
+      onClick={requestClose}
     >
       <div
         ref={panelRef}
@@ -377,7 +419,7 @@ export default function Drawer({
               <p className="text-sm opacity-70">From {friend.name}’s list</p>
             )}
           </div>
-          <button onClick={onClose} className="text-2xl px-2" aria-label="Close">
+          <button onClick={requestClose} className="text-2xl px-2" aria-label="Close">
             ×
           </button>
         </div>
@@ -886,16 +928,11 @@ export default function Drawer({
           onDelete={onDeleteTranslator}
           notify={notice}
         />
-        <div
-          className={
-            "rounded-2xl p-4 space-y-3 transition " +
-            (fin ? "bg-plum/15 ring-2 ring-plum/40" : "opacity-40")
-          }
-        >
-          <p className="font-bold">
-            {fin
-              ? "Your verdict"
-              : "Unlocks when you mark it Completed, Read on Hiatus or Dropped"}
+        <div className="rounded-2xl p-4 space-y-3 transition bg-plum/10">
+          <p className="font-bold">Your verdict</p>
+          <p className="text-xs opacity-60">
+            Reviews save at any status. The final rating unlocks at Completed,
+            Read on Hiatus or Dropped.
           </p>
           <L t="Final rating (0–10)">
             <input
@@ -926,9 +963,21 @@ export default function Drawer({
                 <Auto
                   className="inp"
                   rows={4}
-                  disabled={!fin}
                   value={f.review || ""}
                   onChange={(e) => set("review", e.target.value)}
+                  onBlur={(e) => {
+                    // Clicking Save/blurring straight to it is handled by the
+                    // full save below; every other blur flushes the review.
+                    const next = e.relatedTarget;
+                    const button = next?.closest?.("button");
+                    if (
+                      button &&
+                      /Save changes|Add to my list/i.test(button.textContent || "")
+                    ) {
+                      return;
+                    }
+                    flushReview();
+                  }}
                 />
               </L>
               <p className="text-xs opacity-60">

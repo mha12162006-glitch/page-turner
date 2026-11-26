@@ -88,6 +88,11 @@ export function seriesWritePayload(row = {}, userId, extra = {}) {
   };
 }
 
+/** A review write touches exactly one real column and nothing else. */
+export function reviewUpdatePayload(review) {
+  return { review: nullable(review) };
+}
+
 /** Never hide a rejected insert behind a generic toast. */
 export function saveErrorMessage(error, updating = false) {
   console.error(error);
@@ -95,4 +100,12 @@ export function saveErrorMessage(error, updating = false) {
   return updating
     ? `Could not save those changes. Please try again: ${message}`
     : `Could not add this series, please try again: ${message}`;
+}
+
+/** Review failures need the real Supabase message, verbatim. */
+export function reviewSaveErrorMessage(error) {
+  console.error(error);
+  return `Review save error: ${String(
+    error?.message ?? error ?? "Unknown error"
+  )}`;
 }

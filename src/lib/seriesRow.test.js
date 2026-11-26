@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   anilistIdOrNull,
+  reviewSaveErrorMessage,
+  reviewUpdatePayload,
   saveErrorMessage,
   seriesWritePayload,
   SERIES_WRITE_FIELDS
@@ -63,6 +65,24 @@ describe("series write payload", () => {
     expect(row.total_chapters).toBe(null);
     expect(row.excitement).toBe(5);
     expect(row.rating).toBe(null);
+  });
+
+  it("writes only the review column when a review is auto-saved", () => {
+    expect(reviewUpdatePayload("  Great story  ")).toEqual({
+      review: "Great story"
+    });
+    expect(reviewUpdatePayload("   ")).toEqual({ review: null });
+    expect(Object.keys(reviewUpdatePayload("x"))).toEqual(["review"]);
+  });
+
+  it("shows the exact Supabase message for a rejected review write", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const error = { message: "check constraint review_length" };
+    expect(reviewSaveErrorMessage(error)).toBe(
+      "Review save error: check constraint review_length"
+    );
+    expect(errorSpy).toHaveBeenCalledWith(error);
+    errorSpy.mockRestore();
   });
 
   it("logs the database error and includes its message in the toast", () => {

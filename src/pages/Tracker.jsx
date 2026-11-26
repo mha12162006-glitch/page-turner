@@ -30,7 +30,12 @@ import {
 import { attachOwnNotes, privateNoteRow, stripNotes } from "../lib/notes";
 import { ORDER, positionsFor, readOrder, sortItems, writeOrder } from "../lib/listOrder";
 import { resolveCustom } from "../lib/customPresets";
-import { saveErrorMessage, seriesWritePayload } from "../lib/seriesRow";
+import {
+  reviewSaveErrorMessage,
+  reviewUpdatePayload,
+  saveErrorMessage,
+  seriesWritePayload
+} from "../lib/seriesRow";
 import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
 import { WARNING_PRESETS } from "../lib/warnings";
 import AddFromFriend from "../components/AddFromFriend";
@@ -78,6 +83,9 @@ export default function Tracker({ user, dark, setDark, th }) {
   const dragIdx = useRef(null);
   const fileRef = useRef();
   const toastTimer = useRef();
+  // Last review successfully written for each row. Background reloads and
+  // status/tab filters must never replace it with an older snapshot.
+  const reviewOverrides = useRef(new Map());
   // Read on every render so a chip added in one drawer is available in the
   // next one, without ever scraping values from series rows.
   const customOptions = {
@@ -102,7 +110,14 @@ export default function Tracker({ user, dark, setDark, th }) {
         .select("series_id,user_id,note")
         .eq("user_id", user.id)
     ]);
-    setItems(attachOwnNotes(seriesResult.data || [], notesResult.data || []));
+    const overrides = reviewOverrides.current;
+    const rows = attachOwnNotes(
+      seriesResult.data || [],
+      notesResult.data || []
+    ).map((row) =>
+      overrides.has(row.id) ? { ...row, review: overrides.get(row.id) } : row
+    );
+    setItems(rows);
     setMychars(charsResult.data || []);
   };
   useEffect(() => {
@@ -185,7 +200,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       .upsert(row, { onConflict: "series_id" });
     return error || null;
   };
-  const save = async (s, chs0 = []) => {
+  const save = async (s, chs0 = [], meta = {}) => {
     const {
       id,
       created_at,
@@ -196,6 +211,10 @@ export default function Tracker({ user, dark, setDark, th }) {
     } = s;
     let rest = r0;
     let chs = chs0;
+    const reportError = (error) =>
+      meta.reviewChanged && id
+        ? reviewSaveErrorMessage(error)
+        : saveErrorMessage(error, !!id);
     // Only AniList-linked rows have a detail endpoint. MangaUpdates/Kitsu rows
     // carry anilist_id: null and must never trigger an AniList lookup/toast.
     if (rest.anilist_id != null && rest.anilist_id !== "" && needsEnrichment(rest)) {
@@ -209,7 +228,7 @@ export default function Tracker({ user, dark, setDark, th }) {
       const dup = await findExistingSeries(user.id, rest, items);
       if (dup) {
         setDupe([dup]);
-        return;
+        return false;
       }
     }
     const payload = seriesWritePayload(
@@ -223,8 +242,8 @@ export default function Tracker({ user, dark, setDark, th }) {
         ? await sb.from("series").update(payload).eq("id", id).select("id").single()
         : await sb.from("series").insert(payload).select("id").single();
     } catch (error) {
-      say(saveErrorMessage(error, !!id));
-      return;
+      say(reportError(error));
+      return false;
     }
     if (r.error) {
       const error = r.error;
@@ -232,14 +251,21 @@ export default function Tracker({ user, dark, setDark, th }) {
         const dup = await findExistingSeries(user.id, rest, []);
         if (dup) {
           setDupe([dup]);
-          return;
+          return false;
         }
       }
-      say(saveErrorMessage(error, !!id));
-      return;
+      say(reportError(error));
+      return false;
     }
 
     const sid = r.data.id;
+    const savedReview = payload.review ?? null;
+    // Apply the review before any refetch so a realtime refresh that started
+    // before this write cannot put the previous text back in the list.
+    reviewOverrides.current.set(sid, savedReview);
+    setItems((prev) =>
+      prev.map((x) => (x.id === sid ? { ...x, review: savedReview } : x))
+    );
     const myNote = String(note ?? "");
     let noteNote = "";
     try {
@@ -286,6 +312,47 @@ export default function Tracker({ user, dark, setDark, th }) {
     setOpen(null);
     await load();
     say(charNote || noteNote || (id ? "Saved" : "Added"));
+    return true;
+  };
+
+  /**
+   * Review-only writes never go through the full form. The UUID is the only
+   * filter, and the payload is one real column, so null AniList ids and joined
+   * fields cannot interfere. Returning a boolean lets the drawer retry on a
+   * real Supabase error instead of marking the text as saved.
+   */
+  const saveReview = async (series, review) => {
+    if (!series?.id) return false;
+    const payload = reviewUpdatePayload(review);
+    if (String(series.review ?? "") === String(payload.review ?? "")) return true;
+    let r;
+    try {
+      r = await sb
+        .from("series")
+        .update(payload)
+        .eq("id", series.id)
+        .select("id, review")
+        .single();
+    } catch (error) {
+      say(reviewSaveErrorMessage(error));
+      return false;
+    }
+    if (r.error) {
+      say(reviewSaveErrorMessage(r.error));
+      return false;
+    }
+    if (!r.data?.id) {
+      const error = new Error(`Series ${series.id} was not found`);
+      say(reviewSaveErrorMessage(error));
+      return false;
+    }
+    const savedReview = r.data.review ?? null;
+    reviewOverrides.current.set(series.id, savedReview);
+    const apply = (prev) =>
+      prev.map((x) => (x.id === series.id ? { ...x, review: savedReview } : x));
+    setItems(apply);
+    setOpen((prev) => (prev?.id === series.id ? { ...prev, review: savedReview } : prev));
+    return true;
   };
   const saveProf = async (p) => {
     const { error } = await sb.from("profiles").upsert({ user_id: user.id, ...p });
@@ -299,6 +366,7 @@ export default function Tracker({ user, dark, setDark, th }) {
   };
   const del = async (s) => {
     await sb.from("series").delete().eq("id", s.id);
+    reviewOverrides.current.delete(s.id);
     setOpen(null);
     load();
   };
@@ -1241,6 +1309,7 @@ export default function Tracker({ user, dark, setDark, th }) {
           fr={open.id ? friendHas(open) : []}
           onClose={() => setOpen(null)}
           onSave={save}
+          onReviewSave={saveReview}
           onDelete={del}
           onShare={(s) => link(s.id)}
           onRecommend={(s) => setRecFor(s)}
