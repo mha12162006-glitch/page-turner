@@ -77,22 +77,13 @@ export default function Tracker({ user, dark, setDark, th }) {
   const dragIdx = useRef(null);
   const fileRef = useRef();
   const toastTimer = useRef();
-  const customOptions = useMemo(
-    () => ({
-      warnings: resolveCustom(
-        "warnings",
-        WARNING_PRESETS,
-        items.map((x) => x.warnings)
-      ),
-      genres: resolveCustom(
-        "genres",
-        GENRE_PRESETS,
-        items.map((x) => x.genres)
-      ),
-      tags: resolveCustom("tags", TROPE_PRESETS, items.map((x) => x.tags))
-    }),
-    [items]
-  );
+  // Read on every render so a chip added in one drawer is available in the
+  // next one, without ever scraping values from series rows.
+  const customOptions = {
+    warnings: resolveCustom("warnings", WARNING_PRESETS),
+    genres: resolveCustom("genres", GENRE_PRESETS),
+    tags: resolveCustom("tags", TROPE_PRESETS)
+  };
   const load = async () => {
     const [seriesResult, charsResult, notesResult] = await Promise.all([
       sb

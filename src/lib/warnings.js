@@ -11,7 +11,8 @@ export const WARNING_PRESETS = Object.freeze([
   "Drugs / Substance Abuse",
   "Cannibalism",
   "Body Horror",
-  "Slavery"
+  "Slavery",
+  "War"
 ]);
 
 const asArray = (value) =>
@@ -28,7 +29,9 @@ const lower = (value) => String(value || "").trim().toLowerCase();
 /**
  * Map AniList tag objects to the exact warning-box labels used by the drawer.
  * Only tags ranked 40+ count. Sexual-assault tags become "Explicit S.A" at
- * rank 60+, otherwise "Implied S.A".
+ * rank 60+, otherwise "Implied S.A". The result is always a subset of
+ * WARNING_PRESETS: raw tag names and long descriptive sentences are never
+ * copied into the warning chips.
  */
 export function mapTagsToWarnings(tags = [], genres = [], isAdult = false) {
   const active = asArray(tags).filter((tag) => {
@@ -77,6 +80,9 @@ export function mapTagsToWarnings(tags = [], genres = [], isAdult = false) {
   if (plainHas(/cannibal/i)) found.add("Cannibalism");
   if (plainHas(/body horror/i)) found.add("Body Horror");
   if (plainHas(/slavery|slave/i)) found.add("Slavery");
+  if (plainHas(/\bwar\b|\bwarfare\b|armed conflict|military conflict/i)) {
+    found.add("War");
+  }
 
   return WARNING_PRESETS.filter((label) => found.has(label));
 }

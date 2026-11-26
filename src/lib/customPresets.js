@@ -1,7 +1,4 @@
-import { splitTags } from "./tags";
-import { parseWarnings } from "./warnings";
-
-const KEY = "mt-custom-presets-v1";
+const KEY = "mt-custom-presets-v2";
 const KINDS = ["warnings", "genres", "tags"];
 
 const keyOf = (value) =>
@@ -76,38 +73,18 @@ export function forgetCustom(kind, label) {
 }
 
 /**
- * Custom chips from this browser plus custom values already used on the
- * owner's series. Built-ins and explicitly removed chips are never returned.
+ * Only the curated built-ins plus chips the current user explicitly added.
+ * Values from existing series are deliberately ignored: comma-splitting old
+ * rows used to fill the global preset pool with long, messy phrases.
  */
-export function resolveCustom(kind, builtins = [], values = []) {
+export function resolveCustom(kind, builtins = []) {
   if (!KINDS.includes(kind)) return [];
   const data = read();
   const builtKeys = new Set((builtins || []).map(keyOf));
   const removedKeys = new Set((data[kind].removed || []).map(keyOf));
-  const out = [];
-  const add = (label) => {
-    const clean = String(label || "").trim();
-    const key = keyOf(clean);
-    if (
-      !key ||
-      builtKeys.has(key) ||
-      removedKeys.has(key) ||
-      out.some((x) => keyOf(x) === key)
-    ) {
-      return;
-    }
-    out.push(clean);
-  };
-
-  data[kind].added.forEach(add);
-  for (const raw of values || []) {
-    const list =
-      kind === "warnings"
-        ? parseWarnings(raw)
-        : Array.isArray(raw)
-          ? splitTags(raw)
-          : splitTags(raw);
-    list.forEach(add);
-  }
-  return out;
+  return data[kind].added.filter(
+    (label) =>
+      !builtKeys.has(keyOf(label)) &&
+      !removedKeys.has(keyOf(label))
+  );
 }

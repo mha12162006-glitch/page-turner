@@ -13,7 +13,7 @@ const tag = (name, rank, isMediaSpoiler = false) => ({
 });
 
 describe("mapTagsToWarnings", () => {
-  it("matches Solo Leveling's rank-40 bullying tag and ignores lower ranks", () => {
+  it("matches rank-40 bullying and rank-90 war while ignoring lower ranks", () => {
     const tags = [
       tag("Dungeon", 95),
       tag("Super Power", 92),
@@ -23,7 +23,8 @@ describe("mapTagsToWarnings", () => {
       tag("Marriage", 16)
     ];
     expect(mapTagsToWarnings(tags, ["Action", "Adventure", "Fantasy"], false)).toEqual([
-      "Bullying"
+      "Bullying",
+      "War"
     ]);
   });
 
@@ -61,7 +62,8 @@ describe("mapTagsToWarnings", () => {
       tag("Drug Abuse", 50),
       tag("Cannibalism", 45),
       tag("Body Horror", 45),
-      tag("Slavery", 45)
+      tag("Slavery", 45),
+      tag("War", 40)
     ];
     expect(mapTagsToWarnings(tags, [], false)).toEqual(
       WARNING_PRESETS.filter((label) => label !== "Implied S.A" && label !== "Explicit S.A")
@@ -71,6 +73,23 @@ describe("mapTagsToWarnings", () => {
   it("adds Nudity / Ecchi for the Ecchi genre or adult media", () => {
     expect(mapTagsToWarnings([], ["Ecchi"], false)).toEqual(["Nudity / Ecchi"]);
     expect(mapTagsToWarnings([], ["Romance"], true)).toEqual(["Nudity / Ecchi"]);
+  });
+
+  it("only ever auto-fills clean built-in labels, never raw tag sentences", () => {
+    const messy = [
+      { name: "poisoning/assassination attempts", rank: 90 },
+      {
+        name: "No explicit or implied sexual violence (100% safe/PG-13; very clean romance)",
+        rank: 90
+      },
+      { name: "severe war trauma and PTSD", rank: 85 },
+      { name: "War", rank: 80 },
+      { name: "and emotional/familial neglect", rank: 80 }
+    ];
+    const result = mapTagsToWarnings(messy, ["War", "Historical"], false);
+    expect(result).toEqual(["Explicit S.A", "War"]);
+    for (const label of result) expect(WARNING_PRESETS).toContain(label);
+    expect(result.some((label) => label.length > 40)).toBe(false);
   });
 });
 

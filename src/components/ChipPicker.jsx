@@ -39,13 +39,10 @@ export default function ChipPicker({
   const savedCustom = unique(customPresets).filter(
     (label) => !builtins.some((preset) => same(preset, label))
   );
-  const currentCustom = values.filter(
-    (label) =>
-      !builtins.some((preset) => same(preset, label)) &&
-      !savedCustom.some((preset) => same(preset, label))
-  );
-  const all = [...builtins, ...savedCustom, ...currentCustom];
-  const deletable = [...savedCustom, ...currentCustom];
+  // Only curated built-ins and chips this user explicitly added. Values on a
+  // series are never split into chips: old rows contain long messy phrases.
+  const all = [...builtins, ...savedCustom];
+  const deletable = [...savedCustom];
   const selected = (label) => values.some((item) => same(item, label));
   const toggle = (label) => {
     if (readOnly) return;
