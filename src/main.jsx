@@ -4,7 +4,9 @@ import "./index.css";
 
 if ("serviceWorker" in navigator) {
   addEventListener("load", () =>
-    navigator.serviceWorker.register("sw.js").catch(() => {})
+    navigator.serviceWorker
+      .register((import.meta.env.BASE_URL || "./") + "sw.js")
+      .catch(() => {})
   );
 }
 

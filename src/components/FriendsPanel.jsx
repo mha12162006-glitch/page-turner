@@ -1,4 +1,5 @@
 import { useState } from "react";
+import useOverlay from "../lib/useOverlay";
 import Avatar from "./Avatar";
 
 export default function FriendsPanel({
@@ -11,6 +12,7 @@ export default function FriendsPanel({
   onLink
 }) {
   const [txt, setTxt] = useState("");
+  const panelRef = useOverlay(onClose, "Friends");
   const other = (r) => (r.requester === me ? r.addressee : r.requester);
   const nm = (r) => prof[other(r)]?.display_name || "Someone";
   const inc = rows.filter((r) => r.status === "pending" && r.addressee === me);
@@ -44,6 +46,10 @@ export default function FriendsPanel({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Friends"
         className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import useOverlay from "../lib/useOverlay";
 import { resizeImg } from "../lib/util";
 import Avatar from "./Avatar";
 
@@ -8,6 +9,7 @@ export default function ProfilePanel({ user, prof, items, onSave, onClose }) {
   const [av, setAv] = useState(prof.avatar_url || "");
   const [pub, setPub] = useState(!!prof.is_public);
   const fr = useRef();
+  const panelRef = useOverlay(onClose, "My profile");
   const togglePub = () => {
     if (!pub) {
       const ok = confirm(
@@ -33,6 +35,10 @@ export default function ProfilePanel({ user, prof, items, onSave, onClose }) {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="My profile"
         className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

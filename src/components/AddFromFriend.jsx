@@ -1,4 +1,5 @@
 import { useState } from "react";
+import useOverlay from "../lib/useOverlay";
 import { same, statusLabel } from "../lib/util";
 
 const ADD_STATUSES = [
@@ -21,6 +22,7 @@ export default function AddFromFriend({
   const [status, setStatus] = useState("want");
   const [chapter, setChapter] = useState("");
   const [busy, setBusy] = useState(false);
+  const panelRef = useOverlay(onClose, "Add from friend");
 
   if (!source) return null;
 
@@ -41,6 +43,10 @@ export default function AddFromFriend({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={"Add " + (source?.title || "series") + " from " + friendName}
         className="pop w-full max-w-md rounded-3xl bg-paper p-6 space-y-4"
         onClick={(event) => event.stopPropagation()}
       >

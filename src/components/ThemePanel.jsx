@@ -1,7 +1,9 @@
+import useOverlay from "../lib/useOverlay";
 import { PRESETS } from "../lib/theme";
 
 export default function ThemePanel({ th, dark, setDark, onClose }) {
   const { t, setT } = th;
+  const panelRef = useOverlay(onClose, "Make it yours");
   const acc = t.accent || PRESETS[t.preset][0];
   const Row = ({ label, children }) => (
     <label className="flex items-center justify-between font-semibold">
@@ -15,6 +17,10 @@ export default function ThemePanel({ th, dark, setDark, onClose }) {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Make it yours"
         className="drawer w-full max-w-sm h-full bg-paper p-6 space-y-5 overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >

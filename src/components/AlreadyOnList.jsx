@@ -1,6 +1,8 @@
+import useOverlay from "../lib/useOverlay";
 import { statusLabel } from "../lib/util";
 
 export default function AlreadyOnList({ items, onOpen, onClose }) {
+  const panelRef = useOverlay(onClose, "Already on your list");
   const list = (Array.isArray(items) ? items : items ? [items] : []).filter(
     Boolean
   );
@@ -12,6 +14,10 @@ export default function AlreadyOnList({ items, onOpen, onClose }) {
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Already on your list"
         className="pop w-full max-w-md rounded-3xl bg-paper p-6 space-y-3"
         onClick={(e) => e.stopPropagation()}
       >

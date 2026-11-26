@@ -1,4 +1,5 @@
 import { useState } from "react";
+import useOverlay from "../lib/useOverlay";
 import Avatar from "./Avatar";
 
 export default function RecModal({
@@ -10,6 +11,7 @@ export default function RecModal({
   onClose
 }) {
   const [justSent, setJustSent] = useState([]);
+  const panelRef = useOverlay(onClose, "Recommend series");
   const sentTo = (uid) =>
     sent.some((r) => r.uid === uid || r.to_user === uid) ||
     justSent.includes(uid);
@@ -26,6 +28,10 @@ export default function RecModal({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={"Recommend " + series?.title}
         className="pop w-full max-w-sm rounded-3xl bg-paper p-6 space-y-3"
         onClick={(e) => e.stopPropagation()}
       >

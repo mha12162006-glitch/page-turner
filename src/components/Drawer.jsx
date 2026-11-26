@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { anilistDetail, searchAniList } from "../lib/anilist";
 import { forgetCustom, rememberCustom } from "../lib/customPresets";
+import useOverlay from "../lib/useOverlay";
 import { GENRE_PRESETS, joinTags, splitTags, TROPE_PRESETS } from "../lib/tags";
 import {
   arr,
@@ -122,6 +123,10 @@ export default function Drawer({
   onDeleteTranslator
 }) {
   const isNew = !item.id;
+  const panelRef = useOverlay(
+    onClose,
+    readOnly ? "Series details" : isNew ? "Add new series" : "Edit series"
+  );
   const mineEntry = (mine || []).find((row) => same(row, item));
   const [f, setF] = useState(() => ({
     ...blank,
@@ -322,6 +327,10 @@ export default function Drawer({
       onClick={onClose}
     >
       <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={readOnly ? "Series details" : isNew ? "Add new series" : "Edit series"}
         className="drawer w-full max-w-xl h-full overflow-y-auto bg-paper dark:bg-night p-6 space-y-4"
         onClick={(e) => e.stopPropagation()}
       >

@@ -50,7 +50,10 @@ export default function Card({
   showNote = !readOnly,
   outgoing = [],
   onWithdraw,
-  translatorCount = 0
+  translatorCount = 0,
+  onMove,
+  moveUpDisabled = false,
+  moveDownDisabled = false
 }) {
   const mine = (fr || []).find((x) => x.isMe === true);
   return (
@@ -191,6 +194,33 @@ export default function Card({
               </span>
             )}
         </div>
+        {onMove && (
+          <div
+            className="mt-2 flex gap-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label={"Move " + s.title + " up"}
+              title="Move up"
+              disabled={moveUpDisabled}
+              onClick={() => onMove(-1)}
+              className="grid h-7 flex-1 place-items-center rounded-lg bg-plum/15 text-sm font-bold text-plum disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label={"Move " + s.title + " down"}
+              title="Move down"
+              disabled={moveDownDisabled}
+              onClick={() => onMove(1)}
+              className="grid h-7 flex-1 place-items-center rounded-lg bg-plum/15 text-sm font-bold text-plum disabled:opacity-30"
+            >
+              ↓
+            </button>
+          </div>
+        )}
         {fr && fr.length > 0 && (
           <div className="mt-2 divide-y divide-plum/15 border-t border-plum/20">
             {fr.map((x, i) => (

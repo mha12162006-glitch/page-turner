@@ -28,6 +28,7 @@ import {
   visibleFriendSeries
 } from "../lib/search";
 import { attachOwnNotes, attachSharedNotes } from "../lib/notes";
+import { ORDER, positionsFor, readOrder, sortItems, writeOrder } from "../lib/listOrder";
 import { resolveCustom } from "../lib/customPresets";
 import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
 import { WARNING_PRESETS } from "../lib/warnings";
@@ -48,6 +49,7 @@ import ThemePanel from "../components/ThemePanel";
 
 export default function Tracker({ user, dark, setDark, th }) {
   const [items, setItems] = useState([]);
+  const [orderMode, setOrderMode] = useState(readOrder);
   const [tab, setTab] = useState("reading");
   const [f, setF] = useState(emptyF);
   const [open, setOpen] = useState(null);
@@ -97,7 +99,7 @@ export default function Tracker({ user, dark, setDark, th }) {
         .from("series")
         .select(SERIES_COLUMNS)
         .eq("user_id", user.id)
-        .order("position"),
+        .order("created_at", { ascending: false }),
       sb
         .from("series_characters")
         .select("*")
@@ -845,9 +847,22 @@ export default function Tracker({ user, dark, setDark, th }) {
     say("Link copied");
   };
   const visible = useMemo(
-    () => applyF(items.filter((i) => (tab === "active" ? i.status !== "done" : i.status === tab)), f),
-    [items, tab, f]
+    () =>
+      sortItems(
+        applyF(
+          items.filter((i) =>
+            tab === "active" ? i.status !== "done" : i.status === tab
+          ),
+          f
+        ),
+        orderMode
+      ),
+    [items, tab, f, orderMode]
   );
+  const chooseOrder = (mode) => {
+    setOrderMode(mode);
+    writeOrder(mode);
+  };
   const searchResults = useMemo(
     () =>
       searchGroups({
@@ -870,25 +885,38 @@ export default function Tracker({ user, dark, setDark, th }) {
       )
     : null;
   const canDrag = f === emptyF || JSON.stringify(f) === JSON.stringify(emptyF);
+  const commitOrder = async (list) => {
+    const pos = positionsFor(list);
+    const byId = Object.fromEntries(pos.map((row) => [row.id, row.position]));
+    setItems((p) =>
+      p.map((x) =>
+        byId[x.id] == null ? x : { ...x, position: byId[x.id] }
+      )
+    );
+    chooseOrder(ORDER.CUSTOM);
+    await Promise.all(
+      pos.map((p) =>
+        sb.from("series").update({ position: p.position }).eq("id", p.id)
+      )
+    );
+    load();
+  };
   const drop = async (to) => {
     const from = dragIdx.current;
     if (from == null || from === to) return;
     const list = [...visible];
     const [m] = list.splice(from, 1);
     list.splice(to, 0, m);
-    const pos = list.map((x, i) => ({ id: x.id, position: i }));
-    setItems((p) =>
-      p
-        .map((x) => ({
-          ...x,
-          position: pos.find((y) => y.id === x.id)?.position ?? x.position
-        }))
-        .sort((a, b) => a.position - b.position)
-    );
-    await Promise.all(
-      pos.map((p) => sb.from("series").update({ position: p.position }).eq("id", p.id))
-    );
-    load();
+    await commitOrder(list);
+  };
+  const move = async (id, direction) => {
+    const list = [...visible];
+    const from = list.findIndex((row) => row.id === id);
+    const to = from + direction;
+    if (from < 0 || to < 0 || to >= list.length) return;
+    const [row] = list.splice(from, 1);
+    list.splice(to, 0, row);
+    await commitOrder(list);
   };
   const onFile = async (e) => {
     const file = e.target.files[0];
@@ -1154,10 +1182,25 @@ export default function Tracker({ user, dark, setDark, th }) {
         />
       ) : (
         <>
-          <Filters f={f} setF={setF} items={items} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Filters f={f} setF={setF} items={items} />
+            <label className="flex items-center gap-2 text-sm font-semibold">
+              <span>Order</span>
+              <select
+                aria-label="List order"
+                value={orderMode}
+                onChange={(e) => chooseOrder(e.target.value)}
+                className="inp w-auto py-1.5"
+              >
+                <option value={ORDER.RECENT}>Recently added</option>
+                <option value={ORDER.CUSTOM}>Custom order</option>
+              </select>
+            </label>
+          </div>
           {tab !== "done" && canDrag && visible.length > 1 && (
             <p className="text-sm opacity-60 text-center sm:text-left">
-              Drag cards to set your reading order. It saves automatically.
+              Drag cards or use the ↑ ↓ buttons to set your order. Saving a manual
+              order switches to Custom order.
             </p>
           )}
           {visible.length === 0 ? (
@@ -1176,6 +1219,13 @@ export default function Tracker({ user, dark, setDark, th }) {
                   outgoing={sentFor(s)}
                   onWithdraw={withdrawSent}
                   translatorCount={translatorRowsFor(s).length}
+                  onMove={
+                    canDrag
+                      ? (direction) => move(s.id, direction)
+                      : null
+                  }
+                  moveUpDisabled={i === 0}
+                  moveDownDisabled={i === visible.length - 1}
                   drag={
                     canDrag
                       ? {
