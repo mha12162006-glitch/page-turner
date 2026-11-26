@@ -196,7 +196,7 @@ export default function Card({
             onClick={(e) => e.stopPropagation()}
           >
             <span className="min-w-0 flex-1 truncate">
-              💌 {outgoing.map((r) => r.name).join(", ")}
+              💌 Sent to - {outgoing.map((r) => r.name).join(", ")}
             </span>
             {onWithdraw && (
               <button
