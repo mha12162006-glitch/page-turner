@@ -68,9 +68,9 @@ function mergeMissing(row, data) {
   if (hasText(data.warnings)) {
     next.warnings = joinWarnings([next.warnings, data.warnings]);
   }
-  if (next.total_chapters == null && data.total_chapters != null) {
-    next.total_chapters = data.total_chapters;
-  }
+  // Detail endpoints are authoritative for the released-chapter total.
+  if (data.total_chapters != null) next.total_chapters = data.total_chapters;
+  if (next.chapter == null && data.chapter != null) next.chapter = data.chapter;
   return next;
 }
 

@@ -23,10 +23,11 @@ const ani = (title, id) => ({
 
 const mockApis = (
   {
-    anilist = [],
-    mangaUpdates = [],
-    kitsu = [],
+    anilist = () => [],
+    mangaUpdates = () => [],
+    kitsu = () => [],
     muDetail = null,
+    kitsuDetail = null,
     kitsuCategories = null,
     fail = ""
   } = {},
@@ -54,12 +55,20 @@ const mockApis = (
     if (url.includes("kitsu.io")) {
       if (fail === "kitsu") throw new Error("offline");
       calls.kitsu = (calls.kitsu || 0) + 1;
+      const id = url.match(/\/manga\/(\d+)/)?.[1];
       if (/\/categories/.test(url)) {
         calls.kitsuUrls = [...(calls.kitsuUrls || []), url];
         return response(
           typeof kitsuCategories === "function"
-            ? kitsuCategories(url.split("/manga/")[1]?.split("/")[0])
+            ? kitsuCategories(id)
             : kitsuCategories || { data: [] }
+        );
+      }
+      if (id) {
+        return response(
+          typeof kitsuDetail === "function"
+            ? kitsuDetail(id)
+            : kitsuDetail || { data: {} }
         );
       }
       const q = new URL(url).searchParams.get("filter[text]");
@@ -259,7 +268,7 @@ describe("multi-source title search", () => {
       read_url: ""
     };
     const full = await completeResult(partial);
-    expect(calls.kitsu).toBe(1);
+    expect(calls.kitsu).toBe(2);
     expect(calls.kitsuUrls[0]).toContain("/categories?page[limit]=40");
     expect(full.format).toBe("Webtoon");
     expect(full.tags).toEqual(["Isekai"]);
@@ -406,6 +415,134 @@ describe("multi-source title search", () => {
     expect(full.tags).toContain("Found family");
     expect(full.warnings).toBe("Child / Domestic Abuse, Grief");
     expect(full.read_url).toBe("");
+  });
+
+  it("parses a MangaUpdates chapter count out of the status sentence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        anilist: () => [],
+        mangaUpdates: () => [
+          {
+            record: {
+              series_id: 901,
+              title: "Completed Comic",
+              status: "125 Chapters (Complete)"
+            }
+          }
+        ],
+        kitsu: () => []
+      })
+    );
+    const [row] = await searchSeries("Completed Comic");
+    expect(row.total_chapters).toBe(125);
+    expect(row.chapter).toBe(0);
+    expect(row.pub_status).toBe("Completed");
+  });
+
+  it("parses a MangaUpdates detail status count when latest_chapter is blank", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          muDetail: () => ({
+            title: "Lore Olympus",
+            status: "48 Chapters (Ongoing)",
+            latest_chapter: null
+          })
+        },
+        calls
+      )
+    );
+    const full = await completeResult({
+      source: "MangaUpdates",
+      _source_id: "901",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Lore Olympus",
+      chapter: 0,
+      total_chapters: null,
+      genres: [],
+      tags: [],
+      warnings: ""
+    });
+    expect(calls.mu).toBe(1);
+    expect(full.total_chapters).toBe(48);
+  });
+
+  it("prefers the Kitsu detail chapterCount over the search result", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          kitsu: () => [],
+          kitsuDetail: () => ({
+            data: { id: 902, attributes: { chapterCount: 160, status: "finished" } }
+          }),
+          kitsuCategories: () => ({ data: [] })
+        },
+        {}
+      )
+    );
+    const full = await completeResult({
+      source: "Kitsu",
+      _source_id: "902",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Completed Kitsu Comic",
+      chapter: 0,
+      total_chapters: 80,
+      genres: [],
+      tags: [],
+      warnings: ""
+    });
+    expect(full.total_chapters).toBe(160);
+    expect(full.pub_status).toBe("Completed");
+  });
+
+  it("cross-checks MangaUpdates by exact title when Kitsu chapterCount is null", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [
+            { record: { series_id: 555, title: "Uriah" } }
+          ],
+          muDetail: () => ({
+            title: "Uriah",
+            status: "48 Chapters (Ongoing)",
+            latest_chapter: null
+          }),
+          kitsu: () => [],
+          kitsuDetail: () => ({
+            data: { id: 777, attributes: { chapterCount: null } }
+          }),
+          kitsuCategories: () => ({ data: [] })
+        },
+        calls
+      )
+    );
+    const full = await completeResult({
+      source: "Kitsu",
+      _source_id: "777",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Uriah",
+      chapter: 0,
+      total_chapters: null,
+      genres: [],
+      tags: [],
+      warnings: ""
+    });
+    expect(calls.kitsu).toBe(2);
+    expect(calls.mu).toBe(2);
+    expect(full.total_chapters).toBe(48);
   });
 
   it("deduplicates a title found everywhere and keeps the AniList id", async () => {

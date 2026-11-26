@@ -44,9 +44,17 @@ const pubStatus = (value) => {
   return "";
 };
 
-const chapterCount = (value) => {
-  const n = Number(text(value).replace(/[^\d.]/g, ""));
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+const chapterCount = (value, status = "") => {
+  const n = Number(text(value));
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  // MangaUpdates often reports its count inside the status sentence instead of
+  // latest_chapter, e.g. "125 Chapters (Complete)" or "48 Chapters (Ongoing)".
+  const fromStatus = text(status).match(/(\d+)\s*Chapters?/i);
+  if (fromStatus) {
+    const parsed = Number(fromStatus[1]);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 };
 
 const cleanDescription = (value) =>
@@ -102,7 +110,10 @@ function standard({
     tags: mapped.tags,
     warnings: mapped.warnings,
     synopsis: clean,
-    total_chapters: chapterCount(total_chapters),
+    // Non-AniList picks start at chapter 0 so cards show "Ch. 0 / Y" and the
+    // +/- controls behave exactly like AniList-linked rows.
+    chapter: 0,
+    total_chapters: chapterCount(total_chapters, pub_status),
     // Internal metadata only; the drawer never copies these into a saved row.
     _source_id: source_id == null ? null : String(source_id),
     _ageRating: text(ageRating)
@@ -127,9 +138,8 @@ function fillFrom(row, extra) {
   out.genres = unionChips(out.genres, extra?.genres);
   out.tags = unionChips(out.tags, extra?.tags);
   out.warnings = joinWarnings([out.warnings, extra?.warnings]);
-  if (out.total_chapters == null && extra?.total_chapters != null) {
-    out.total_chapters = extra.total_chapters;
-  }
+  // A detail endpoint is authoritative for the total chapter count.
+  if (extra?.total_chapters != null) out.total_chapters = extra.total_chapters;
   return out;
 }
 
@@ -137,6 +147,32 @@ async function jsonGet(url, options) {
   const r = await fetch(url, options);
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
+}
+
+/** Exact-title MangaUpdates fallback for Kitsu rows with no chapterCount. */
+async function mangaUpdatesChapterByTitle(title) {
+  const data = await jsonGet(
+    "https://api.mangaupdates.com/v1/series/search",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({ search: text(title), perpage: 10 })
+    }
+  );
+  const wanted = norm(title);
+  const hit = asArray(data?.results).find((entry) => {
+    const record = entry?.record || entry || {};
+    return norm(record.title) === wanted;
+  });
+  const id = hit?.record?.series_id ?? hit?.record?.id ?? hit?.series_id ?? hit?.id;
+  if (id == null) return null;
+  const detail = await jsonGet(
+    "https://api.mangaupdates.com/v1/series/" + encodeURIComponent(id)
+  );
+  return chapterCount(detail?.latest_chapter, detail?.status);
 }
 
 export async function searchMangaUpdates(query, custom = {}) {
@@ -219,9 +255,10 @@ export function needsSeriesDetail(row = {}) {
 
 /**
  * Fetch the matching source detail endpoint for a picked result. MangaUpdates
- * supplies genres, categories and description; Kitsu supplies up to 40
- * categories while its search result supplies synopsis and ageRating. All of
- * it feeds the same Genres/Tropes/Warnings mapper. Failures keep the result.
+ * supplies genres, categories, description and chapter count; Kitsu supplies
+ * its detail record plus up to 40 categories, with an exact-title MangaUpdates
+ * chapter fallback when chapterCount is null. All of it feeds the same mapper.
+ * Failures keep the result already shown in search.
  */
 export async function completeResult(row, custom = {}) {
   if (!needsSeriesDetail(row)) return row;
@@ -243,7 +280,7 @@ export async function completeResult(row, custom = {}) {
         pub_status: d?.status,
         genres: labels,
         categories: d?.categories,
-        total_chapters: d?.latest_chapter,
+        total_chapters: chapterCount(d?.latest_chapter, d?.status),
         type: d?.type,
         country: d?.country ?? d?.country_code,
         labels,
@@ -253,18 +290,42 @@ export async function completeResult(row, custom = {}) {
       return fillFrom(row, extra);
     }
     if (row.source === "Kitsu") {
-      const d = await jsonGet(
-        "https://kitsu.io/api/edge/manga/" +
-          encodeURIComponent(row._source_id) +
-          "/categories?page[limit]=40",
-        { headers: { Accept: "application/vnd.api+json" } }
+      const headers = { Accept: "application/vnd.api+json" };
+      const base = "https://kitsu.io/api/edge/manga/" + encodeURIComponent(row._source_id);
+      const [detailResult, categoriesResult] = await Promise.allSettled([
+        jsonGet(base, { headers }),
+        jsonGet(base + "/categories?page[limit]=40", { headers })
+      ]);
+      if (detailResult.status === "rejected") {
+        console.warn("Kitsu detail lookup failed:", detailResult.reason?.message);
+      }
+      if (categoriesResult.status === "rejected") {
+        console.warn("Kitsu categories lookup failed:", categoriesResult.reason?.message);
+      }
+      const d =
+        detailResult.status === "fulfilled" ? detailResult.value : {};
+      const attributes = d?.data?.attributes || {};
+      const labels = categoryNames(
+        categoriesResult.status === "fulfilled" ? categoriesResult.value?.data : []
       );
-      const labels = categoryNames(d?.data);
+      let total = chapterCount(attributes.chapterCount);
+      // Kitsu leaves chapterCount null for many webtoons; use the exact-title
+      // MangaUpdates entry (search then detail) so the total still fills in.
+      if (total == null && text(row.title)) {
+        try {
+          total = await mangaUpdatesChapterByTitle(row.title);
+        } catch (err) {
+          console.warn("MangaUpdates chapter fallback failed:", err.message);
+        }
+      }
       const extra = standard({
-        synopsis: row.synopsis,
+        cover_url: attributes.posterImage?.large || attributes.posterImage?.medium,
+        synopsis: attributes.synopsis || row.synopsis,
+        pub_status: attributes.status || row.pub_status,
         genres: labels,
         labels,
-        ageRating: row._ageRating,
+        total_chapters: total,
+        ageRating: attributes.ageRating || row._ageRating,
         format: row.format,
         custom
       });
