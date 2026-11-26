@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { completeResult, searchSeries } from "./seriesSearch";
+import { completeResult, searchMangaDex, searchSeries } from "./seriesSearch";
 import { WARNING_PRESETS } from "./warnings";
 
 const response = (body, ok = true, status = 200) => ({
@@ -28,6 +28,8 @@ const mockApis = (
     kitsu = () => [],
     webtoon = () => [],
     webtoonDetail = () => ({}),
+    mangadex = () => [],
+    mangadexAggregate = () => ({ volumes: {} }),
     muDetail = null,
     kitsuDetail = null,
     kitsuCategories = null,
@@ -88,6 +90,22 @@ const mockApis = (
       }
       const q = new URL(url).searchParams.get("filter[text]");
       return response({ data: kitsu(q) });
+    }
+    if (url.includes("api.mangadex.org")) {
+      if (fail === "mangadex") throw new Error("offline");
+      calls.mangadex = (calls.mangadex || 0) + 1;
+      if (/\/manga\/[^/]+\/aggregate/.test(url)) {
+        calls.mangadexAggregate = (calls.mangadexAggregate || 0) + 1;
+        const id = decodeURIComponent(url.match(/\/manga\/([^/]+)\/aggregate/)[1]);
+        return response(
+          typeof mangadexAggregate === "function"
+            ? mangadexAggregate(id)
+            : mangadexAggregate
+        );
+      }
+      const q = new URL(url).searchParams.get("title");
+      calls.mangadexUrl = url;
+      return response({ data: mangadex(q) });
     }
     throw new Error("unexpected URL: " + url);
   });
@@ -749,6 +767,228 @@ describe("multi-source title search", () => {
     expect(full.warnings).toBe("Violence, War");
     expect(full.read_url ?? "").toBe("");
     expect(full.synopsis).not.toMatch(/webtoon made by|--/i);
+  });
+
+  it("finds a Romaji-indexed title through MangaDex with full clean metadata", async () => {
+    const title = "The Villainess Licks the Ice Prince Clean";
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          kitsu: () => [],
+          mangadex: () => [
+            {
+              id: "md-123",
+              attributes: {
+                title: { ja: "Akujo wa Kouri no Prince-kun wo Name Tsukusu" },
+                altTitles: [
+                  { en: title },
+                  { en: "The Villainess Cleans the Ice Prince" }
+                ],
+                description: {
+                  en:
+                    "**[Spoiler]** Reborn as a villainess, Lilian enters a contract marriage with the ice prince. A brutal murder follows. [Source](https://example.com)"
+                },
+                originalLanguage: "ko",
+                status: "ongoing",
+                lastChapter: "37",
+                contentRating: "suggestive",
+                tags: [
+                  { attributes: { name: { en: "Romance" } } },
+                  { attributes: { name: { en: "Drama" } } },
+                  { attributes: { name: { en: "Villainess" } } },
+                  { attributes: { name: { en: "Contract Marriage" } } },
+                  { attributes: { name: { en: "Violence" } } },
+                  { attributes: { name: { en: "Long Strip" } } }
+                ]
+              },
+              relationships: [
+                {
+                  type: "cover_art",
+                  attributes: { fileName: "cover-a1.jpg" }
+                }
+              ]
+            }
+          ]
+        },
+        calls
+      )
+    );
+
+    const [row] = await searchSeries(title);
+    expect(calls.mangadex).toBe(1);
+    expect(calls.mangadexUrl).toBe(
+      "https://api.mangadex.org/manga?title=" +
+        encodeURIComponent(title) +
+        "&limit=10&includes[]=cover_art" +
+        "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica" +
+        "&order[relevance]=desc"
+    );
+    expect(row.source).toBe("MangaDex");
+    expect(row.title).toBe(title);
+    expect(row.anilist_id).toBe(null);
+    expect(row._source_id).toBe("md-123");
+    expect(row._aliases).toContain("akujowakourinoprincekunwonametsukusu");
+    expect(row.cover_url).toBe(
+      "https://uploads.mangadex.org/covers/md-123/cover-a1.jpg.512.jpg"
+    );
+    expect(row.format).toBe("Manhwa");
+    expect(row.pub_status).toBe("Ongoing");
+    expect(row.total_chapters).toBe(37);
+    expect(row.synopsis).toContain("Reborn as a villainess");
+    expect(row.synopsis).not.toMatch(/\[|source|spoiler|\*\*/i);
+    expect(row.genres).toEqual(["Drama", "Romance"]);
+    expect(row.tags).toContain("Villainess");
+    expect(row.tags).toContain("Contract Marriage");
+    expect(row.tags).toContain("Reincarnation / Regression");
+    expect(row.tags).toContain("Historical / Royalty");
+    expect(row.warnings).toBe("Violence, Nudity / Ecchi");
+    expect(Object.hasOwn(row, "read_url")).toBe(false);
+  });
+
+  it("maps MangaDex original languages and long-strip tags to clean formats", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        mangadex: () => [
+          {
+            id: "ja-strip",
+            attributes: {
+              title: { en: "Japanese Webtoon" },
+              originalLanguage: "ja",
+              tags: [
+                { attributes: { name: { en: "Long Strip" } } }
+              ]
+            }
+          },
+          {
+            id: "ja-plain",
+            attributes: {
+              title: { en: "Japanese Manga" },
+              originalLanguage: "ja",
+              tags: [
+                { attributes: { name: { en: "Action" } } }
+              ]
+            }
+          },
+          {
+            id: "en-strip",
+            attributes: {
+              title: { en: "English Webtoon" },
+              originalLanguage: "en",
+              tags: [
+                { attributes: { name: { en: "Web Comic" } } }
+              ]
+            }
+          },
+          {
+            id: "en-plain",
+            attributes: {
+              title: { en: "English Comic" },
+              originalLanguage: "en",
+              tags: [
+                { attributes: { name: { en: "Action" } } }
+              ]
+            }
+          },
+          {
+            id: "zh-hk",
+            attributes: {
+              title: { en: "Hong Kong Manhua" },
+              originalLanguage: "zh-hk"
+            }
+          }
+        ]
+      })
+    );
+    const rows = await searchMangaDex("formats");
+    expect(Object.fromEntries(rows.map((row) => [row.title, row.format]))).toEqual({
+      "Japanese Webtoon": "Webtoon",
+      "Japanese Manga": "Manga",
+      "English Webtoon": "Webtoon",
+      "English Comic": "Comic",
+      "Hong Kong Manhua": "Manhua"
+    });
+  });
+
+  it("uses the MangaDex aggregate endpoint when lastChapter is blank", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          mangadexAggregate: () => ({
+            volumes: {
+              1: {
+                chapters: {
+                  "1": { chapter: "1" },
+                  "7": { chapter: "7" },
+                  "12": { chapter: "12.5" }
+                }
+              }
+            }
+          })
+        },
+        calls
+      )
+    );
+    const row = {
+      source: "MangaDex",
+      _source_id: "md-123",
+      _ageRating: "suggestive",
+      anilist_id: null,
+      title: "Aggregate Example",
+      cover_url: "https://uploads.mangadex.org/covers/md-123/c.jpg.512.jpg",
+      synopsis: "A clean synopsis.",
+      format: "Manhwa",
+      pub_status: "Ongoing",
+      genres: ["Action"],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    };
+    const full = await completeResult(row);
+    expect(calls.mangadexAggregate).toBe(1);
+    expect(full.total_chapters).toBe(12);
+    expect(full.read_url).toBe("");
+
+    await completeResult({ ...row, total_chapters: 37 });
+    expect(calls.mangadexAggregate).toBe(1);
+  });
+
+  it("dedupes MangaDex results by English alt-title", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        anilist: () => [],
+        mangaUpdates: () => [
+          {
+            record: {
+              series_id: 555,
+              title: "Uriah",
+              latest_chapter: "142"
+            }
+          }
+        ],
+        kitsu: () => [],
+        mangadex: () => [
+          {
+            id: "md-uriah",
+            attributes: {
+              title: { ko: "우리아" },
+              altTitles: [{ en: "Uriah" }],
+              originalLanguage: "ko"
+            }
+          }
+        ]
+      })
+    );
+    const rows = await searchSeries("Uriah");
+    expect(rows.map((row) => row.source)).toEqual(["MangaUpdates"]);
   });
 
   it("deduplicates a title found everywhere and keeps the AniList id", async () => {

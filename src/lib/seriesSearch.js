@@ -5,10 +5,11 @@ import { joinWarnings } from "./warnings";
 import { detectFormat, isPlaceholderSynopsis, norm, proxyCover } from "./util";
 
 /**
- * Title search across four free sources. AniList stays first so existing
- * anilist_id links keep working; MangaUpdates, Kitsu and the WEBTOON API cover
- * Western comics and webtoons that AniList excludes by country of origin.
- * Every failure is isolated so one unavailable source never blocks the others.
+ * Title search across five free sources. AniList stays first so existing
+ * anilist_id links keep working; MangaUpdates, Kitsu, WEBTOON and MangaDex
+ * cover Western comics and webtoons that AniList excludes by country of
+ * origin. MangaDex also finds Romaji/Japanese-only listings. Every failure is
+ * isolated so one unavailable source never blocks the others.
  */
 
 const asArray = (value) =>
@@ -59,6 +60,93 @@ const chapterCount = (value, status = "") => {
 
 const cleanDescription = (value) =>
   cleanSyn(String(value || "").replace(/\[\/?[^\]]+\]/g, " "));
+
+const MANGADEX_API = "https://api.mangadex.org";
+
+const localText = (value, fallback = "") => {
+  if (typeof value === "string" || typeof value === "number") return text(value);
+  if (!value || typeof value !== "object") return text(fallback);
+  const english = text(value.en ?? value.en_us ?? value["en-US"]);
+  if (english) return english;
+  return text(Object.values(value)[0] ?? fallback);
+};
+
+const stripMangaDexMarkdown = (value) =>
+  String(value || "")
+    .replace(/\[(?:source|written\s+by)[^\]]*\]\([^)]*\)/gi, " ")
+    .replace(/\[url=[^\]]+\]([^[]+)\[\/url\]/gi, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\[\/?(?:b|i|u|s|br|hr|h[1-6]|quote|code|spoiler|img)[^\]]*\]/gi, " ")
+    .replace(/[*_~`>]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const mangaDexSynopsis = (description) =>
+  cleanDescription(stripMangaDexMarkdown(localText(description)));
+
+const mangaDexTitle = (entry = {}) => {
+  const attributes = entry.attributes || {};
+  const english = text(attributes.title?.en);
+  if (english) return english;
+  const englishAlt = asArray(attributes.altTitles)
+    .map((alt) => text(alt?.en))
+    .find(Boolean);
+  if (englishAlt) return englishAlt;
+  return Object.values(attributes.title || {}).map(localText).find(Boolean) || "";
+};
+
+const mangaDexAliases = (entry = {}) => {
+  const attributes = entry.attributes || {};
+  return [
+    ...Object.values(attributes.title || {}).map(text),
+    ...asArray(attributes.altTitles).map((alt) => text(alt?.en))
+  ]
+    .map(norm)
+    .filter(Boolean);
+};
+
+const mangaDexTagNames = (tags) =>
+  asArray(tags)
+    .map((tag) => localText(tag?.attributes?.name))
+    .filter(Boolean);
+
+const mangaDexFormat = (language, tags = []) => {
+  const lang = text(language).toLowerCase();
+  const longStrip = tags.some((name) =>
+    /web\s*comic|long\s*strip|webtoon/i.test(name)
+  );
+  if (lang === "ko") return "Manhwa";
+  if (lang === "zh" || lang === "zh-hk") return "Manhua";
+  if (lang === "ja") return longStrip ? "Webtoon" : "Manga";
+  if (lang === "en") return longStrip ? "Webtoon" : "Comic";
+  return (longStrip && "Webtoon") || detectFormat({ country: lang, labels: tags });
+};
+
+const mangaDexCover = (entry = {}) => {
+  const cover = asArray(entry.relationships).find(
+    (rel) => text(rel?.type).toLowerCase() === "cover_art"
+  );
+  const fileName = text(cover?.attributes?.fileName);
+  return fileName && entry.id
+    ? MANGADEX_API.replace("api.", "uploads.") +
+        "/covers/" +
+        encodeURIComponent(entry.id) +
+        "/" +
+        encodeURIComponent(fileName) +
+        ".512.jpg"
+    : "";
+};
+
+const aggregateMaxChapter = (data) => {
+  let max = null;
+  for (const volume of Object.values(data?.volumes || {})) {
+    for (const chapter of Object.values(volume?.chapters || {})) {
+      const number = chapterCount(chapter?.chapter);
+      if (number != null && (max == null || number > max)) max = number;
+    }
+  }
+  return max;
+};
 
 /**
  * Map every source into the same three chip fields. Both ranked tags and
@@ -285,11 +373,55 @@ export async function searchWebtoon(query, custom = {}) {
     .filter((row) => row.title);
 }
 
+/**
+ * MangaDex searches English titles, English alt-titles and the original
+ * Romaji/Japanese title in one request, so obscure listings appear alongside
+ * the other sources. Its search payload already includes full metadata.
+ */
+export async function searchMangaDex(query, custom = {}) {
+  const url =
+    MANGADEX_API +
+    "/manga?title=" +
+    encodeURIComponent(query) +
+    "&limit=10&includes[]=cover_art" +
+    "&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica" +
+    "&order[relevance]=desc";
+  const data = await jsonGet(url, { headers: { Accept: "application/json" } });
+  return asArray(data?.data)
+    .map((entry) => {
+      const a = entry.attributes || {};
+      const tags = mangaDexTagNames(a.tags);
+      const rating = text(a.contentRating).toLowerCase();
+      const labels =
+        rating === "suggestive" || rating === "erotica"
+          ? [...tags, "Ecchi"]
+          : tags;
+      const row = standard({
+        title: mangaDexTitle(entry),
+        cover_url: mangaDexCover(entry),
+        synopsis: mangaDexSynopsis(a.description),
+        pub_status: a.status,
+        genres: tags,
+        categories: tags,
+        labels,
+        warningTags: labels.map((name) => ({ name, rank: 80 })),
+        total_chapters: a.lastChapter,
+        format: mangaDexFormat(a.originalLanguage, tags),
+        source_id: entry.id,
+        ageRating: rating,
+        isAdult: rating === "erotica",
+        custom
+      });
+      return { ...row, _aliases: mangaDexAliases(entry) };
+    })
+    .filter((row) => row.title);
+}
+
 /** Every non-AniList source has a detail endpoint worth checking. */
 export function needsSeriesDetail(row = {}) {
   return (
     !!text(row._source_id) &&
-    ["MangaUpdates", "Kitsu", "WEBTOON"].includes(row.source)
+    ["MangaUpdates", "Kitsu", "WEBTOON", "MangaDex"].includes(row.source)
   );
 }
 
@@ -303,6 +435,23 @@ export function needsSeriesDetail(row = {}) {
 export async function completeResult(row, custom = {}) {
   if (!needsSeriesDetail(row)) return row;
   try {
+    if (row.source === "MangaDex") {
+      const id = text(row._source_id);
+      // Search already carries the full description and tags. Only a missing
+      // lastChapter needs the aggregate endpoint to find the highest chapter.
+      if (!id || row.total_chapters != null) return row;
+      try {
+        const data = await jsonGet(
+          MANGADEX_API + "/manga/" + encodeURIComponent(id) + "/aggregate",
+          { headers: { Accept: "application/json" } }
+        );
+        const total = aggregateMaxChapter(data);
+        if (total != null) return { ...row, total_chapters: total };
+      } catch (err) {
+        console.warn("MangaDex aggregate lookup failed:", err.message);
+      }
+      return row;
+    }
     if (row.source === "WEBTOON") {
       const fallbackUrl = text(row._source_id)
         ? "https://www.webtoons.com/en/detail/series/list?title_no=" +
@@ -426,28 +575,32 @@ export async function completeResult(row, custom = {}) {
   return row;
 }
 
-/** AniList first, then MangaUpdates/Kitsu/WEBTOON, deduped by title. */
+/** AniList first, then MangaUpdates/Kitsu/WEBTOON/MangaDex, deduped by title. */
 export async function searchSeries(query, custom = {}) {
   const q = text(query);
   if (q.length < 3) return [];
-  const [anilist, mangaUpdates, kitsu, webtoon] = await Promise.all([
+  const [anilist, mangaUpdates, kitsu, webtoon, mangadex] = await Promise.all([
     searchAniList(q, custom).catch(() => []),
     searchMangaUpdates(q, custom).catch(() => []),
     searchKitsu(q, custom).catch(() => []),
-    searchWebtoon(q, custom).catch(() => [])
+    searchWebtoon(q, custom).catch(() => []),
+    searchMangaDex(q, custom).catch(() => [])
   ]);
   const out = [];
   const seen = new Set();
+  const keysOf = (row) =>
+    [row?.title, ...asArray(row?._aliases)].map(norm).filter(Boolean);
   for (const [rows, source] of [
     [anilist, "AniList"],
     [mangaUpdates, "MangaUpdates"],
     [kitsu, "Kitsu"],
-    [webtoon, "WEBTOON"]
+    [webtoon, "WEBTOON"],
+    [mangadex, "MangaDex"]
   ]) {
     for (const row of rows || []) {
-      const key = norm(row?.title);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
+      const keys = keysOf(row);
+      if (!keys.length || keys.some((key) => seen.has(key))) continue;
+      keys.forEach((key) => seen.add(key));
       out.push({ ...row, source });
     }
   }
