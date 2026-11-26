@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { same, STAT, statusLabel } from "../lib/util";
+import { FORMATS, same, STAT, statusLabel } from "../lib/util";
 import { visibleFriendSeries } from "../lib/search";
 import Avatar from "./Avatar";
 import Card from "./Card";
@@ -24,17 +24,21 @@ export default function FriendsView({
 }) {
   const [uid, setUid] = useState(friends[0]?.uid || "");
   const [filter, setFilter] = useState("all");
+  const [format, setFormat] = useState("");
 
   useEffect(() => {
     if (!friends.some((friend) => friend.uid === uid)) {
       setUid(friends[0]?.uid || "");
       setFilter("all");
+      setFormat("");
     }
   }, [friends, uid]);
 
   const friend = friends.find((row) => row.uid === uid);
   const visible = visibleFriendSeries(series);
-  const rows = visible.filter((row) => row.user_id === uid);
+  const rows = visible.filter(
+    (row) => row.user_id === uid && (!format || row.format === format)
+  );
   const counts = {
     all: rows.length,
     reading: rows.filter((row) => row.status === "reading").length,
@@ -116,6 +120,7 @@ export default function FriendsView({
                 onClick={() => {
                   setUid(row.uid);
                   setFilter("all");
+                  setFormat("");
                 }}
                 className={
                   "flex shrink-0 items-center gap-2 rounded-full px-3 py-1.5 text-sm font-bold " +
@@ -144,7 +149,20 @@ export default function FriendsView({
         )}
 
         <div>
-          <p className="text-sm font-semibold opacity-70">Filter their list</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold opacity-70">Filter their list</p>
+            <select
+              aria-label="Friend category"
+              className="inp sm:!w-auto"
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
+              <option value="">All categories</option>
+              {FORMATS.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </div>
           <div className="mt-2 grid grid-cols-3 sm:grid-cols-6 gap-2">
             {FILTERS.map(([key, label]) => (
               <button

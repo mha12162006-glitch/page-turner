@@ -41,6 +41,13 @@ create table if not exists public.series (
   created_at timestamptz not null default now()
 );
 
+-- Old installs had a three-value format check; widen it for webtoons/comics.
+alter table public.series
+  drop constraint if exists series_format_check;
+alter table public.series
+  add constraint series_format_check
+  check (format in ('Manhwa', 'Manga', 'Manhua', 'Webtoon', 'Comic'));
+
 alter table public.series add column if not exists is_hidden boolean not null default false;
 alter table public.series add column if not exists chapter int;
 alter table public.series add column if not exists total_chapters int;

@@ -1,4 +1,3 @@
-import { norm } from "./util";
 import { mapTagsToWarnings, parseWarnings } from "./warnings";
 import { mapGenres, mapTropes } from "./tags";
 
@@ -133,6 +132,9 @@ export async function searchAniList(q) {
 }
 
 export async function anilistDetail(id) {
+  // A null id means this is a MangaUpdates/Kitsu/comic row. It has no AniList
+  // detail endpoint, so never make a request or announce an AniList failure.
+  if (id == null || id === "") throw new Error("AniList id missing");
   const data = await anilistQuery(DETAIL_QUERY, { id });
   const m = data.Media;
   if (!m) {
@@ -194,38 +196,19 @@ function fillMissing(row, source) {
 }
 
 /**
- * Fill only missing details. "Link to read" is intentionally never filled;
- * it stays blank until the owner types a URL. A failed lookup is announced
- * through the AniList notice event, but the row stays saveable.
+ * Fill only missing details for rows that already have an AniList id. Rows
+ * from MangaUpdates/Kitsu (or manual entry) have no id and are left untouched:
+ * no AniList request, no AniList error toast. "Link to read" is never filled.
  */
-export async function enrich(base, search = searchAniList) {
+export async function enrich(base) {
   let row = { ...base };
   let chars = [];
+  const id = row.anilist_id;
+  if (id == null || id === "") return { row, chars };
   try {
-    let id = row.anilist_id;
-    let found = null;
-    if (!id) {
-      const matches = await search(row.title);
-      const rn = norm(row.title);
-      found =
-        matches.find((match) => {
-          const mn = norm(match.title);
-          return mn && (mn.includes(rn) || rn.includes(mn));
-        }) || null;
-      if (found) {
-        row = fillMissing(row, found);
-        if (found.anilist_id != null && found.anilist_id !== "") {
-          id = found.anilist_id;
-          row.anilist_id = id;
-        }
-      }
-    }
-    if (id) {
-      row = fillMissing(row, found);
-      const detail = await anilistDetail(id);
-      row = fillMissing(row, detail);
-      chars = detail.chars || [];
-    }
+    const detail = await anilistDetail(id);
+    row = fillMissing(row, detail);
+    chars = detail.chars || [];
   } catch (err) {
     // anilistQuery has already shown a message; keep the save usable.
   }

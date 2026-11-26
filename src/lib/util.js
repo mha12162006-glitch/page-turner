@@ -6,7 +6,30 @@ export const STATUS = [
   ["done", "Completed"]
 ];
 
-export const FORMATS = ["Manhwa", "Manga", "Manhua"];
+export const FORMATS = ["Manhwa", "Manga", "Manhua", "Webtoon", "Comic"];
+
+const asText = (v) => String(v ?? "").trim();
+const hasWebtoonLabel = (labels = []) =>
+  (Array.isArray(labels) ? labels : [labels]).some((label) =>
+    /web\s*toon/i.test(asText(label))
+  );
+
+/**
+ * Category detection shared by MangaUpdates and Kitsu results. An explicit
+ * Webtoon tag wins over a broad OEL/Western label; country codes keep the
+ * existing KR/CN/TW/JP behaviour intact.
+ */
+export function detectFormat({ type, subtype, country, labels = [] } = {}) {
+  const raw = [type, subtype, country].map(asText).join(" ").toLowerCase();
+  if (hasWebtoonLabel(labels) || /web\s*toon/.test(raw)) return "Webtoon";
+  if (/\b(oel|western|comics?)\b/.test(raw)) return "Comic";
+  if (/manhwa|korea|\bkr\b/.test(raw)) return "Manhwa";
+  if (/manhua|china|taiwan|hong kong|\bcn\b|\btw\b|\bhk\b/.test(raw)) {
+    return "Manhua";
+  }
+  if (/manga|japan|\bjp\b/.test(raw)) return "Manga";
+  return "";
+}
 
 export const PUB = [
   "Ongoing",

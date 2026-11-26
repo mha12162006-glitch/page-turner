@@ -55,6 +55,47 @@ describe("AniList reading links", () => {
     expect(row.read_url).toBe("");
   });
 
+  it("makes no AniList request for a row without an anilist_id", async () => {
+    const spy = vi.fn(async () => ({ ...response }));
+    vi.stubGlobal("fetch", spy);
+    const base = {
+      title: "Uriah",
+      synopsis: "",
+      genres: [],
+      warnings: "",
+      read_url: ""
+    };
+    const { row, chars } = await enrich(base);
+    expect(spy).not.toHaveBeenCalled();
+    expect(row).toEqual(base);
+    expect(chars).toEqual([]);
+  });
+
+  it("only announces a failure after a real AniList request", async () => {
+    const notices = [];
+    vi.stubGlobal("window", {
+      dispatchEvent: (event) => notices.push(event.detail)
+    });
+    vi.stubGlobal(
+      "CustomEvent",
+      class {
+        constructor(type, options) {
+          this.type = type;
+          this.detail = options.detail;
+        }
+      }
+    );
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ...response, ok: false, status: 500 })));
+    await enrich({
+      title: "Example",
+      anilist_id: 42,
+      synopsis: "",
+      genres: [],
+      warnings: ""
+    });
+    expect(notices.some((n) => /AniList did not respond/.test(n.message))).toBe(true);
+  });
+
   it("keeps a link typed by the owner", async () => {
     const mine = "https://example.com/my-link";
     const { row } = await enrich({

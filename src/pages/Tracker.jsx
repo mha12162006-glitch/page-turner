@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { needsEnrichment } from "../lib/anilist";
-import { searchSeries } from "../lib/seriesSearch";
 import {
   addFriend,
   findExistingSeries,
@@ -203,9 +202,11 @@ export default function Tracker({ user, dark, setDark, th }) {
     } = s;
     let rest = r0;
     let chs = chs0;
-    if (needsEnrichment(rest)) {
+    // Only AniList-linked rows have a detail endpoint. MangaUpdates/Kitsu rows
+    // carry anilist_id: null and must never trigger an AniList lookup/toast.
+    if (rest.anilist_id != null && rest.anilist_id !== "" && needsEnrichment(rest)) {
       say("Filling in details…");
-      const e = await enrich(rest, searchSeries);
+      const e = await enrich(rest);
       rest = e.row;
     }
     if (!id) {

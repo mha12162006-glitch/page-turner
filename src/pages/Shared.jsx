@@ -6,7 +6,7 @@ import {
   sb,
   SHARED_SERIES_COLUMNS
 } from "../lib/supabase";
-import { relWith, same, STATUS, statusLabel } from "../lib/util";
+import { FORMATS, relWith, same, STATUS, statusLabel } from "../lib/util";
 import { latestPerSeries, seriesKey } from "../lib/search";
 import AddFromFriend from "../components/AddFromFriend";
 import AlreadyOnList from "../components/AlreadyOnList";
@@ -24,6 +24,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
   const [dupe, setDupe] = useState(null);
   const [addFor, setAddFor] = useState(null);
   const [toast, setToast] = useState("");
+  const [format, setFormat] = useState("");
   const toastTimer = useRef();
   const say = (m) => {
     setToast(m);
@@ -90,6 +91,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
     setOpen(null);
     setAddFor(null);
     setDupe(null);
+    setFormat("");
     loadAll();
     loadRel();
   }, [uid, sid, me?.id]);
@@ -119,6 +121,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           }))
       : [];
   const canAdd = !!me && me.id !== uid;
+  const shown = (items || []).filter((i) => !format || i.format === format);
   const openMine = (series) => {
     if (series?.id) {
       try {
@@ -240,6 +243,19 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           </div>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
+          {items && (
+            <select
+              aria-label="Category"
+              className="inp sm:!w-auto"
+              value={format}
+              onChange={(e) => setFormat(e.target.value)}
+            >
+              <option value="">All categories</option>
+              {FORMATS.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          )}
           {me && (
             <a href="#/" className={pill}>
               ← My list
@@ -253,11 +269,13 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       </header>
       {items === null ? (
         <p>Loading…</p>
-      ) : items.length === 0 ? (
-        <p className="opacity-70">This list is private or empty.</p>
+      ) : shown.length === 0 ? (
+        <p className="opacity-70">
+          {format ? "Nothing in this category." : "This list is private or empty."}
+        </p>
       ) : (
         STATUS.map(([k, l]) => {
-          const g = items.filter((i) => i.status === k);
+          const g = shown.filter((i) => i.status === k);
           return (
             g.length > 0 && (
               <section key={k}>

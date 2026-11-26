@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { searchSeries } from "./seriesSearch";
+import { completeResult, searchSeries } from "./seriesSearch";
 import { WARNING_PRESETS } from "./warnings";
 
 const response = (body, ok = true, status = 200) => ({
@@ -21,7 +21,17 @@ const ani = (title, id) => ({
   status: "RELEASING"
 });
 
-const mockApis = ({ anilist = [], mangaUpdates = [], kitsu = [], fail = "" } = {}) =>
+const mockApis = (
+  {
+    anilist = [],
+    mangaUpdates = [],
+    kitsu = [],
+    muDetail = null,
+    kitsuCategories = null,
+    fail = ""
+  } = {},
+  calls = {}
+) =>
   vi.fn(async (input, options = {}) => {
     const url = urlOf(input);
     if (url.includes("graphql.anilist.co")) {
@@ -30,11 +40,27 @@ const mockApis = ({ anilist = [], mangaUpdates = [], kitsu = [], fail = "" } = {
     }
     if (url.includes("api.mangaupdates.com")) {
       if (fail === "mangaupdates") throw new Error("offline");
+      calls.mu = (calls.mu || 0) + 1;
+      if (/\/v1\/series\/\d+/.test(url)) {
+        return response(
+          typeof muDetail === "function"
+            ? muDetail(url.split("/v1/series/")[1])
+            : muDetail || {}
+        );
+      }
       const body = JSON.parse(options.body);
       return response({ results: mangaUpdates(body.search) });
     }
     if (url.includes("kitsu.io")) {
       if (fail === "kitsu") throw new Error("offline");
+      calls.kitsu = (calls.kitsu || 0) + 1;
+      if (/\/categories/.test(url)) {
+        return response(
+          typeof kitsuCategories === "function"
+            ? kitsuCategories(url.split("/manga/")[1]?.split("/")[0])
+            : kitsuCategories || { data: [] }
+        );
+      }
       const q = new URL(url).searchParams.get("filter[text]");
       return response({ data: kitsu(q) });
     }
@@ -52,20 +78,23 @@ describe("multi-source title search", () => {
         mangaUpdates: () => [
           {
             record: {
+              series_id: 555,
               title: "Uriah",
+              type: "Webtoon",
               image: { url: { original: "https://img.example/uriah-mu.jpg" } },
               genres: [{ genre: "Action" }, { genre: "Violence" }, { genre: "Isekai" }],
               description: "A western webtoon about a cursed knight.",
               latest_chapter: "142",
-              year: 2020,
               status: "Ongoing"
             }
           }
         ],
         kitsu: () => [
           {
+            id: 777,
             attributes: {
               canonicalTitle: "Uriah: Bloodline",
+              subtype: "oel",
               posterImage: { large: "https://img.example/uriah-kitsu.jpg" },
               synopsis: "Kitsu synopsis.",
               status: "finished",
@@ -81,6 +110,8 @@ describe("multi-source title search", () => {
     expect(rows.map((r) => r.source)).toEqual(["MangaUpdates", "Kitsu"]);
     const uriah = rows[0];
     expect(uriah.anilist_id).toBe(null);
+    expect(uriah._source_id).toBe("555");
+    expect(uriah.format).toBe("Webtoon");
     expect(uriah.title).toBe("Uriah");
     expect(uriah.cover_url).toBe("https://img.example/uriah-mu.jpg");
     expect(uriah.synopsis).toBe("A western webtoon about a cursed knight.");
@@ -92,7 +123,147 @@ describe("multi-source title search", () => {
     expect(WARNING_PRESETS).toContain(uriah.warnings);
     expect(Object.hasOwn(uriah, "read_url")).toBe(false);
     expect(rows[1].anilist_id).toBe(null);
+    expect(rows[1]._source_id).toBe("777");
+    expect(rows[1].format).toBe("Comic");
     expect(rows[1].total_chapters).toBe(88);
+  });
+
+  it("detects OEL as Comic unless a Webtoon tag is present", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        anilist: () => [],
+        mangaUpdates: () => [
+          {
+            record: {
+              series_id: 900,
+              title: "The Beginning After the End",
+              type: "OEL",
+              genres: [{ genre: "Fantasy" }]
+            }
+          },
+          {
+            record: {
+              series_id: 901,
+              title: "Webtoon OEL Example",
+              type: "OEL",
+              genres: [{ genre: "Webtoon" }]
+            }
+          }
+        ],
+        kitsu: () => [
+          {
+            id: 902,
+            attributes: {
+              canonicalTitle: "The Beginning After the End: Western Edition",
+              subtype: "western",
+              genres: ["Action", "Reincarnation"]
+            }
+          }
+        ]
+      })
+    );
+
+    const rows = await searchSeries("The Beginning After the End");
+    const tbate = rows.find((r) => r.title === "The Beginning After the End" && r.source === "MangaUpdates");
+    expect(tbate.format).toBe("Comic");
+    const tagged = rows.find((r) => r.title === "Webtoon OEL Example");
+    expect(tagged.format).toBe("Webtoon");
+    const kitsu = rows.find((r) => r.source === "Kitsu");
+    expect(kitsu.format).toBe("Comic");
+    expect(kitsu.tags).toContain("Reincarnation / Regression");
+  });
+
+  it("completes a partial MangaUpdates result from its detail endpoint", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          muDetail: () => ({
+            series_id: 555,
+            title: "Uriah",
+            type: "Webtoon",
+            image: { url: { original: "https://img.example/uriah-full.jpg" } },
+            description: "Full webtoon synopsis.",
+            status: "Ongoing",
+            genres: [{ genre: "Action" }, { genre: "Violence" }],
+            latest_chapter: "142"
+          })
+        },
+        calls
+      )
+    );
+    const partial = {
+      source: "MangaUpdates",
+      _source_id: "555",
+      anilist_id: null,
+      title: "Uriah",
+      cover_url: "",
+      synopsis: "",
+      format: "",
+      pub_status: "",
+      genres: [],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    };
+    const full = await completeResult(partial);
+    expect(calls.mu).toBe(1);
+    expect(full.cover_url).toBe("https://img.example/uriah-full.jpg");
+    expect(full.synopsis).toBe("Full webtoon synopsis.");
+    expect(full.format).toBe("Webtoon");
+    expect(full.genres).toEqual(["Action"]);
+    expect(full.warnings).toBe("Violence");
+    expect(full.total_chapters).toBe(142);
+    expect(full.read_url).toBe("");
+  });
+
+  it("uses Kitsu categories to add clean tags and a Webtoon category", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          kitsu: () => [],
+          kitsuCategories: () => ({
+            data: [
+              { id: 1, attributes: { title: "Webtoon" } },
+              { id: 2, attributes: { title: "Isekai" } },
+              { id: 3, attributes: { title: "Violence" } },
+              { id: 4, attributes: { title: "Some messy uncategorised tag" } }
+            ]
+          })
+        },
+        calls
+      )
+    );
+    const partial = {
+      source: "Kitsu",
+      _source_id: "902",
+      anilist_id: null,
+      title: "The Beginning After the End",
+      cover_url: "https://img.example/tbate.jpg",
+      synopsis: "Kitsu synopsis.",
+      format: "Comic",
+      pub_status: "Ongoing",
+      genres: ["Action"],
+      tags: [],
+      warnings: "",
+      total_chapters: 80,
+      read_url: ""
+    };
+    const full = await completeResult(partial);
+    expect(calls.kitsu).toBe(1);
+    expect(full.format).toBe("Webtoon");
+    expect(full.tags).toEqual(["Isekai"]);
+    expect(full.warnings).toBe("Violence");
+    expect(full.genres).toEqual(["Action"]);
+    expect(full.read_url).toBe("");
   });
 
   it("deduplicates a title found everywhere and keeps the AniList id", async () => {
@@ -114,6 +285,7 @@ describe("multi-source title search", () => {
     expect(rows[0].source).toBe("AniList");
     expect(rows[0].anilist_id).toBe(42);
     expect(rows[0].cover_url).toBe("https://img.example/42.jpg");
+    expect(rows[0].read_url ?? "").toBe("");
   });
 
   it("still returns other sources when one API is down", async () => {

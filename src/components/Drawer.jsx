@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { anilistDetail } from "../lib/anilist";
-import { searchSeries } from "../lib/seriesSearch";
+import { completeResult, searchSeries } from "../lib/seriesSearch";
 import { forgetCustom, rememberCustom } from "../lib/customPresets";
 import useOverlay from "../lib/useOverlay";
 import { GENRE_PRESETS, joinTags, splitTags, TROPE_PRESETS } from "../lib/tags";
@@ -147,6 +147,7 @@ export default function Drawer({
   const [autoWarnings, setAutoWarnings] = useState("");
   const [warnTouched, setWarnTouched] = useState(false);
   const fRef = useRef(f);
+  const pickSeq = useRef(0);
   const notice = notify || (() => {});
   useEffect(() => {
     fRef.current = f;
@@ -233,70 +234,59 @@ export default function Drawer({
       status: k,
       chapter: k === "done" && p.total_chapters ? p.total_chapters : p.chapter
     }));
-  const pick = (r) => {
-    const before = fRef.current;
-    setF((p) => mergePick(p, r));
+  const markWarningsIfNew = (before, data) => {
     if (
       !parseWarnings(before.warnings).length &&
-      parseWarnings(r.warnings).length
+      parseWarnings(data?.warnings).length
     ) {
-      markAutoWarnings(r.warnings);
+      markAutoWarnings(data.warnings);
     }
+  };
+  const pick = async (r) => {
+    const seq = ++pickSeq.current;
+    const before = fRef.current;
+    setF((p) => mergePick(p, r));
+    markWarningsIfNew(before, r);
     setRes([]);
     setQ("");
-    // MangaUpdates/Kitsu rows already carry the metadata; non-AniList results
-    // have no detail endpoint and must not trigger one with a null id.
-    if (r.anilist_id == null || r.anilist_id === "") return;
-    anilistDetail(r.anilist_id)
-      .then((d) => {
-        const latest = fRef.current;
-        setF((p) => mergeMissing(p, d));
-        if (
-          !parseWarnings(latest.warnings).length &&
-          parseWarnings(d.warnings).length
-        ) {
-          markAutoWarnings(d.warnings);
-        }
-        setChars((c) => (c.length ? c : d.chars));
-      })
-      .catch(() => {});
+    // MangaUpdates/Kitsu rows have no AniList id: finish them from their own
+    // detail endpoint instead of ever calling anilistDetail() with a null id.
+    if (r.anilist_id == null || r.anilist_id === "") {
+      const full = await completeResult(r);
+      if (seq !== pickSeq.current || full === r) return;
+      setF((p) => mergePick(p, full));
+      markWarningsIfNew(before, full);
+      return;
+    }
+    try {
+      const d = await anilistDetail(r.anilist_id);
+      if (seq !== pickSeq.current) return;
+      setF((p) => mergeMissing(p, d));
+      markWarningsIfNew(before, d);
+      setChars((c) => (c.length ? c : d.chars));
+    } catch (e) {
+      // anilist.js announces real AniList failures; keep the drawer usable.
+    }
   };
   const fill = async () => {
+    // No AniList id means there is no AniList detail to fetch. Manual entries
+    // and non-AniList picks are already complete and stay untouched.
+    if (f.anilist_id == null || f.anilist_id === "") {
+      notice("This title is not linked to AniList, so there is nothing to fill.");
+      return;
+    }
     setBusy(true);
     try {
-      let id = f.anilist_id;
-      if (!id) {
-        const r = (await searchSeries(f.title))[0];
-        if (!r) {
-          notice("Could not find this title in any source.");
-          return;
-        }
-        id = r.anilist_id;
-        const before = fRef.current;
-        setF((p) => ({ ...mergeMissing(p, r), anilist_id: id ?? null }));
-        if (
-          !parseWarnings(before.warnings).length &&
-          parseWarnings(r.warnings).length
-        ) {
-          markAutoWarnings(r.warnings);
-        }
-      }
-      if (!id) return;
-      const d = await anilistDetail(id);
-      const latest = fRef.current;
+      const before = fRef.current;
+      const d = await anilistDetail(f.anilist_id);
       setF((p) => mergeMissing(p, d));
-      if (
-        !parseWarnings(latest.warnings).length &&
-        parseWarnings(d.warnings).length
-      ) {
-        markAutoWarnings(d.warnings);
-      }
+      markWarningsIfNew(before, d);
       setChars((c) => [
         ...c,
         ...d.chars.filter((x) => !c.some((y) => norm(y.name) === norm(x.name)))
       ]);
     } catch (e) {
-      // anilist.js announces failures; keep the drawer usable.
+      // anilist.js announces real AniList failures; keep the drawer usable.
     } finally {
       setBusy(false);
     }

@@ -5,7 +5,7 @@ create table if not exists public.series (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   title text not null,
   cover_url text,
-  format text not null default 'Manhwa' check (format in ('Manhwa','Manga','Manhua')),
+  format text not null default 'Manhwa' check (format in ('Manhwa','Manga','Manhua','Webtoon','Comic')),
   genres text[] not null default '{}',
   synopsis text,
   status text not null default 'want' check (status in ('want','reading','hiatus','dropped','done')),
