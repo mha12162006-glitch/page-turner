@@ -1,5 +1,5 @@
-import { mapTagsToWarnings, parseWarnings } from "./warnings";
-import { mapGenres, mapTropes } from "./tags";
+import { mapAutoFields } from "./autoTags";
+import { parseWarnings } from "./warnings";
 
 export const cleanSyn = (t) =>
   (t || "")
@@ -89,12 +89,21 @@ async function anilistQuery(query, variables) {
 const tagList = (media) => (Array.isArray(media.tags) ? media.tags : []);
 const genreList = (media) => (Array.isArray(media.genres) ? media.genres : []);
 
-export async function searchAniList(q) {
+export async function searchAniList(q, custom = {}) {
   const data = await anilistQuery(SEARCH_QUERY, { s: q });
   const media = data.Page?.media || [];
   return media.map((m) => {
     const genres = genreList(m);
     const tags = tagList(m);
+    const synopsis = cleanSyn(m.description);
+    const mapped = mapAutoFields({
+      labels: genres,
+      tags,
+      genres,
+      synopsis,
+      isAdult: !!m.isAdult,
+      custom
+    });
     return {
       anilist_id: m.id,
       pub_status:
@@ -113,15 +122,15 @@ export async function searchAniList(q) {
           : ["CN", "TW", "HK"].includes(m.countryOfOrigin)
             ? "Manhua"
             : "Manga",
-      genres: mapGenres(genres),
-      tags: mapTropes(tags),
-      warnings: mapTagsToWarnings(tags, genres, !!m.isAdult).join(", "),
-      synopsis: cleanSyn(m.description)
+      genres: mapped.genres,
+      tags: mapped.tags,
+      warnings: mapped.warnings,
+      synopsis
     };
   });
 }
 
-export async function anilistDetail(id) {
+export async function anilistDetail(id, custom = {}) {
   // A null id means this is a MangaUpdates/Kitsu/manual comic. It has no
   // AniList endpoint, so return before any request or user-facing message.
   if (id == null || id === "") {
@@ -136,11 +145,20 @@ export async function anilistDetail(id) {
   }
   const tags = tagList(m);
   const genres = genreList(m);
+  const synopsis = cleanSyn(m.description);
+  const mapped = mapAutoFields({
+    labels: genres,
+    tags,
+    genres,
+    synopsis,
+    isAdult: !!m.isAdult,
+    custom
+  });
   return {
-    synopsis: cleanSyn(m.description),
-    genres: mapGenres(genres),
-    tags: mapTropes(tags),
-    warnings: mapTagsToWarnings(tags, genres, !!m.isAdult).join(", "),
+    synopsis,
+    genres: mapped.genres,
+    tags: mapped.tags,
+    warnings: mapped.warnings,
     total_chapters: m.status === "FINISHED" ? m.chapters || null : null,
     chars: (m.characters?.nodes || []).map((n) => ({
       name: n.name.full,

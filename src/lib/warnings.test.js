@@ -73,6 +73,18 @@ describe("mapTagsToWarnings", () => {
   it("adds Nudity / Ecchi for the Ecchi genre or adult media", () => {
     expect(mapTagsToWarnings([], ["Ecchi"], false)).toEqual(["Nudity / Ecchi"]);
     expect(mapTagsToWarnings([], ["Romance"], true)).toEqual(["Nudity / Ecchi"]);
+    expect(mapTagsToWarnings([], [], false, "", "R18")).toEqual(["Nudity / Ecchi"]);
+  });
+
+  it("maps source synonyms to the clean warning chips", () => {
+    expect(
+      mapTagsToWarnings(
+        [],
+        [],
+        false,
+        "There is blood after a murder. Neglect and stalking follow a kidnapping."
+      )
+    ).toEqual(["Violence", "Child / Domestic Abuse"]);
   });
 
   it("only ever auto-fills clean built-in labels, never raw tag sentences", () => {
@@ -87,7 +99,8 @@ describe("mapTagsToWarnings", () => {
       { name: "and emotional/familial neglect", rank: 80 }
     ];
     const result = mapTagsToWarnings(messy, ["War", "Historical"], false);
-    expect(result).toEqual(["Explicit S.A", "War"]);
+    // "neglect" is a synonym for the built-in Child / Domestic Abuse chip.
+    expect(result).toEqual(["Explicit S.A", "Child / Domestic Abuse", "War"]);
     for (const label of result) expect(WARNING_PRESETS).toContain(label);
     expect(result.some((label) => label.length > 40)).toBe(false);
   });

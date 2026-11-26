@@ -1,6 +1,7 @@
 import { searchAniList, cleanSyn } from "./anilist";
-import { mapGenres, mapTropes } from "./tags";
-import { mapTagsToWarnings } from "./warnings";
+import { mapAutoFields } from "./autoTags";
+import { joinTags, splitTags } from "./tags";
+import { joinWarnings } from "./warnings";
 import { detectFormat, norm } from "./util";
 
 /**
@@ -18,7 +19,7 @@ const genreNames = (value) =>
   asArray(value)
     .map((item) => {
       if (typeof item === "string") return item;
-      return text(item?.genre ?? item?.name ?? item?.title);
+      return text(item?.genre ?? item?.category ?? item?.name ?? item?.title);
     })
     .filter(Boolean);
 
@@ -27,7 +28,9 @@ const categoryNames = (value) =>
     .map((item) => {
       if (typeof item === "string") return item;
       const a = item?.attributes || {};
-      return text(a.title ?? a.name ?? item?.title ?? item?.name);
+      return text(
+        a.title ?? a.name ?? item?.category ?? item?.title ?? item?.name
+      );
     })
     .filter(Boolean);
 
@@ -46,16 +49,21 @@ const chapterCount = (value) => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 };
 
-const has = (value) =>
-  Array.isArray(value) ? value.length > 0 : !!text(value);
+const cleanDescription = (value) =>
+  cleanSyn(String(value || "").replace(/\[\/?[^\]]+\]/g, " "));
 
-/** Only built-in Genre/Trope/Warning labels are ever produced here. */
+/**
+ * Map every source into the same three chip fields. Both ranked tags and
+ * plain category names are accepted; synopsis and Kitsu age ratings add
+ * keyword matches. Only curated built-in labels are returned.
+ */
 function standard({
   title,
   cover_url,
   synopsis,
   pub_status,
   genres,
+  categories = [],
   total_chapters,
   anilist_id = null,
   format = "",
@@ -63,30 +71,48 @@ function standard({
   type,
   subtype,
   country,
-  labels = []
+  labels = [],
+  ageRating = "",
+  warningTags = null,
+  isAdult = false,
+  custom = {}
 }) {
-  const names = genreNames(genres);
-  const allLabels = [...names, ...categoryNames(labels)];
+  const names = [
+    ...genreNames(genres),
+    ...categoryNames(categories),
+    ...categoryNames(labels)
+  ];
+  const clean = cleanDescription(synopsis);
+  const mapped = mapAutoFields({
+    labels: names,
+    tags: warningTags || names.map((name) => ({ name, rank: 80 })),
+    genres: names,
+    synopsis: clean,
+    ageRating: text(ageRating),
+    isAdult,
+    custom
+  });
   return {
     anilist_id,
     title: text(title),
     cover_url: text(cover_url),
-    format: text(format) || detectFormat({ type, subtype, country, labels: allLabels }),
+    format: text(format) || detectFormat({ type, subtype, country, labels: names }),
     pub_status: pubStatus(pub_status),
-    genres: mapGenres(names),
-    tags: mapTropes(names.map((name) => ({ name }))),
-    warnings: mapTagsToWarnings(
-      names.map((name) => ({ name, rank: 80 })),
-      names,
-      false
-    ).join(", "),
-    synopsis: cleanSyn(synopsis),
+    genres: mapped.genres,
+    tags: mapped.tags,
+    warnings: mapped.warnings,
+    synopsis: clean,
     total_chapters: chapterCount(total_chapters),
-    // Internal metadata only; the drawer never copies this into the form/save.
-    _source_id: source_id == null ? null : String(source_id)
+    // Internal metadata only; the drawer never copies these into a saved row.
+    _source_id: source_id == null ? null : String(source_id),
+    _ageRating: text(ageRating)
   };
 }
 
+const unionChips = (a, b) =>
+  splitTags(joinTags([...splitTags(a), ...splitTags(b)]));
+
+/** Fill scalar fields when blank, but combine all auto-detected chip fields. */
 function fillFrom(row, extra) {
   const out = { ...row };
   if (!text(out.title) && text(extra?.title)) out.title = extra.title;
@@ -98,9 +124,9 @@ function fillFrom(row, extra) {
     out.pub_status = extra.pub_status;
   }
   if (!text(out.format) && text(extra?.format)) out.format = extra.format;
-  if (!has(out.genres) && has(extra?.genres)) out.genres = [...extra.genres];
-  if (!has(out.tags) && has(extra?.tags)) out.tags = [...extra.tags];
-  if (!text(out.warnings) && text(extra?.warnings)) out.warnings = extra.warnings;
+  out.genres = unionChips(out.genres, extra?.genres);
+  out.tags = unionChips(out.tags, extra?.tags);
+  out.warnings = joinWarnings([out.warnings, extra?.warnings]);
   if (out.total_chapters == null && extra?.total_chapters != null) {
     out.total_chapters = extra.total_chapters;
   }
@@ -113,7 +139,7 @@ async function jsonGet(url, options) {
   return r.json();
 }
 
-export async function searchMangaUpdates(query) {
+export async function searchMangaUpdates(query, custom = {}) {
   const data = await jsonGet(
     "https://api.mangaupdates.com/v1/series/search",
     {
@@ -128,24 +154,29 @@ export async function searchMangaUpdates(query) {
   return asArray(data?.results)
     .map((entry) => {
       const r = entry?.record || entry || {};
-      const labels = genreNames(r.genres);
+      const labels = [
+        ...genreNames(r.genres),
+        ...categoryNames(r.categories)
+      ];
       return standard({
         title: r.title,
         cover_url: r.image?.url?.original || r.image?.url?.thumbnail,
-        synopsis: String(r.description || "").replace(/\[\/?[^\]]+\]/g, " "),
+        synopsis: r.description,
         pub_status: r.status,
-        genres: r.genres,
+        genres: labels,
+        categories: r.categories,
         total_chapters: r.latest_chapter,
         type: r.type,
         country: r.country ?? r.country_code,
         labels,
-        source_id: r.series_id ?? r.id
+        source_id: r.series_id ?? r.id,
+        custom
       });
     })
     .filter((row) => row.title);
 }
 
-export async function searchKitsu(query) {
+export async function searchKitsu(query, custom = {}) {
   const data = await jsonGet(
     "https://kitsu.io/api/edge/manga?filter[text]=" +
       encodeURIComponent(query) +
@@ -166,38 +197,33 @@ export async function searchKitsu(query) {
         synopsis: a.synopsis,
         pub_status: a.status,
         genres: labels,
+        categories: a.categories,
         total_chapters: a.chapterCount,
         subtype: a.subtype,
         country: a.countryCode ?? a.country,
         labels,
-        source_id: entry?.id
+        ageRating: a.ageRating,
+        source_id: entry?.id,
+        custom
       });
     })
     .filter((row) => row.title);
 }
 
-/** True when a non-AniList result can still gain categories from its detail endpoint. */
+/** MangaUpdates/Kitsu picks always have a detail endpoint worth checking. */
 export function needsSeriesDetail(row = {}) {
-  if (!text(row._source_id)) return false;
-  if (!["MangaUpdates", "Kitsu"].includes(row.source)) return false;
   return (
-    !text(row.synopsis) ||
-    !text(row.cover_url) ||
-    !text(row.pub_status) ||
-    !text(row.format) ||
-    !has(row.genres) ||
-    !has(row.tags) ||
-    !text(row.warnings) ||
-    row.total_chapters == null
+    !!text(row._source_id) && ["MangaUpdates", "Kitsu"].includes(row.source)
   );
 }
 
 /**
- * Fetch the matching source detail endpoint when a search result is partial.
- * MangaUpdates returns full series metadata; Kitsu only adds categories.
- * failures are ignored so a picked result always stays saveable.
+ * Fetch the matching source detail endpoint for a picked result. MangaUpdates
+ * supplies genres, categories and description; Kitsu supplies up to 40
+ * categories while its search result supplies synopsis and ageRating. All of
+ * it feeds the same Genres/Tropes/Warnings mapper. Failures keep the result.
  */
-export async function completeResult(row) {
+export async function completeResult(row, custom = {}) {
   if (!needsSeriesDetail(row)) return row;
   try {
     if (row.source === "MangaUpdates") {
@@ -207,18 +233,22 @@ export async function completeResult(row) {
       );
       const labels = [
         ...genreNames(d?.genres),
-        ...genreNames(d?.tags)
+        ...genreNames(d?.tags),
+        ...categoryNames(d?.categories)
       ];
       const extra = standard({
         title: d?.title,
         cover_url: d?.image?.url?.original || d?.image?.url?.thumbnail,
-        synopsis: String(d?.description || "").replace(/\[\/?[^\]]+\]/g, " "),
+        synopsis: d?.description || row.synopsis,
         pub_status: d?.status,
         genres: labels,
+        categories: d?.categories,
         total_chapters: d?.latest_chapter,
         type: d?.type,
         country: d?.country ?? d?.country_code,
-        labels
+        labels,
+        ageRating: row._ageRating,
+        custom
       });
       return fillFrom(row, extra);
     }
@@ -226,29 +256,38 @@ export async function completeResult(row) {
       const d = await jsonGet(
         "https://kitsu.io/api/edge/manga/" +
           encodeURIComponent(row._source_id) +
-          "/categories"
+          "/categories?page[limit]=40",
+        { headers: { Accept: "application/vnd.api+json" } }
       );
       const labels = categoryNames(d?.data);
-      const extra = standard({ genres: labels, labels });
+      const extra = standard({
+        synopsis: row.synopsis,
+        genres: labels,
+        labels,
+        ageRating: row._ageRating,
+        format: row.format,
+        custom
+      });
       const out = fillFrom(row, extra);
       // A Webtoon category is explicit and beats a generic OEL/Western subtype.
       if (detectFormat({ labels }) === "Webtoon") out.format = "Webtoon";
       return out;
     }
   } catch (err) {
-    // Keep the already-mapped search result when detail lookup is unavailable.
+    // Keep the mapped search result when the detail lookup is unavailable.
+    console.warn("Source detail lookup failed:", err.message);
   }
   return row;
 }
 
 /** AniList first, then MangaUpdates and Kitsu, deduped by normalized title. */
-export async function searchSeries(query) {
+export async function searchSeries(query, custom = {}) {
   const q = text(query);
   if (q.length < 3) return [];
   const [anilist, mangaUpdates, kitsu] = await Promise.all([
-    searchAniList(q).catch(() => []),
-    searchMangaUpdates(q).catch(() => []),
-    searchKitsu(q).catch(() => [])
+    searchAniList(q, custom).catch(() => []),
+    searchMangaUpdates(q, custom).catch(() => []),
+    searchKitsu(q, custom).catch(() => [])
   ]);
   const out = [];
   const seen = new Set();

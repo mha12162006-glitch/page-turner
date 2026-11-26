@@ -55,6 +55,7 @@ const mockApis = (
       if (fail === "kitsu") throw new Error("offline");
       calls.kitsu = (calls.kitsu || 0) + 1;
       if (/\/categories/.test(url)) {
+        calls.kitsuUrls = [...(calls.kitsuUrls || []), url];
         return response(
           typeof kitsuCategories === "function"
             ? kitsuCategories(url.split("/manga/")[1]?.split("/")[0])
@@ -259,10 +260,151 @@ describe("multi-source title search", () => {
     };
     const full = await completeResult(partial);
     expect(calls.kitsu).toBe(1);
+    expect(calls.kitsuUrls[0]).toContain("/categories?page[limit]=40");
     expect(full.format).toBe("Webtoon");
     expect(full.tags).toEqual(["Isekai"]);
     expect(full.warnings).toBe("Violence");
     expect(full.genres).toEqual(["Action"]);
+    expect(full.read_url).toBe("");
+  });
+
+  it("fills Uriah warnings and tropes from MangaUpdates detail", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          muDetail: () => ({
+            title: "Uriah",
+            type: "Webtoon",
+            image: { url: { original: "https://img.example/uriah-full.jpg" } },
+            description:
+              "A cursed knight survives brutal murders and blood in another world.",
+            status: "Ongoing",
+            genres: [
+              { genre: "Action" },
+              { genre: "Violence" },
+              { genre: "Isekai" }
+            ],
+            categories: [{ category: "Drama" }],
+            latest_chapter: "142"
+          })
+        },
+        calls
+      )
+    );
+    const picked = {
+      source: "MangaUpdates",
+      _source_id: "555",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Uriah",
+      cover_url: "",
+      synopsis: "",
+      format: "",
+      pub_status: "",
+      genres: [],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    };
+    const full = await completeResult(picked);
+    expect(calls.mu).toBe(1);
+    expect(full.genres).toEqual(["Action", "Drama"]);
+    expect(full.tags).toEqual(["Isekai"]);
+    expect(full.warnings).toBe("Violence");
+    expect(full.read_url).toBe("");
+  });
+
+  it("fills TBATE warnings, tropes and genres from Kitsu detail", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          kitsu: () => [],
+          kitsuCategories: () => ({
+            data: [
+              { attributes: { title: "Isekai" } },
+              { attributes: { title: "Reincarnation" } },
+              { attributes: { title: "Violence" } },
+              { attributes: { title: "War" } }
+            ]
+          })
+        },
+        calls
+      )
+    );
+    const picked = {
+      source: "Kitsu",
+      _source_id: "902",
+      _ageRating: "R18",
+      anilist_id: null,
+      title: "The Beginning After the End",
+      cover_url: "https://img.example/tbate.jpg",
+      synopsis: "An emperor reborn as a child; dungeons and a brutal war.",
+      format: "Comic",
+      pub_status: "Ongoing",
+      genres: ["Action", "Fantasy"],
+      tags: [],
+      warnings: "",
+      total_chapters: 80,
+      read_url: ""
+    };
+    const full = await completeResult(picked);
+    expect(calls.kitsuUrls[0]).toContain("/categories?page[limit]=40");
+    expect(full.genres).toEqual(["Action", "Fantasy"]);
+    expect(full.tags).toEqual([
+      "Isekai",
+      "Reincarnation / Regression",
+      "System / Dungeons",
+      "Historical / Royalty"
+    ]);
+    expect(full.warnings).toBe("Violence, Nudity / Ecchi, War");
+    expect(full.read_url).toBe("");
+  });
+
+  it("honors saved custom chips from source metadata", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          kitsu: () => [],
+          kitsuCategories: () => ({
+            data: [{ attributes: { title: "Found family" } }]
+          })
+        },
+        calls
+      )
+    );
+    const picked = {
+      source: "Kitsu",
+      _source_id: "903",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Custom Chip Example",
+      cover_url: "",
+      synopsis: "A found family survives neglect and grief.",
+      format: "Comic",
+      pub_status: "",
+      genres: [],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    };
+    const full = await completeResult(picked, {
+      tags: ["Found family"],
+      warnings: ["Grief"]
+    });
+    expect(full.tags).toContain("Found family");
+    expect(full.warnings).toBe("Child / Domestic Abuse, Grief");
     expect(full.read_url).toBe("");
   });
 

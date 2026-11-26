@@ -59,14 +59,14 @@ function mergeMissing(row, data) {
   if (!hasText(next.pub_status) && hasText(data.pub_status)) {
     next.pub_status = data.pub_status;
   }
-  if (!splitTags(next.genres).length && splitTags(data.genres).length) {
-    next.genres = joinTags(data.genres);
+  if (splitTags(data.genres).length) {
+    next.genres = joinTags([...splitTags(next.genres), ...splitTags(data.genres)]);
   }
-  if (!splitTags(next.tags).length && splitTags(data.tags).length) {
-    next.tags = joinTags(data.tags);
+  if (splitTags(data.tags).length) {
+    next.tags = joinTags([...splitTags(next.tags), ...splitTags(data.tags)]);
   }
-  if (!parseWarnings(next.warnings).length && hasText(data.warnings)) {
-    next.warnings = joinWarnings(data.warnings);
+  if (hasText(data.warnings)) {
+    next.warnings = joinWarnings([next.warnings, data.warnings]);
   }
   if (next.total_chapters == null && data.total_chapters != null) {
     next.total_chapters = data.total_chapters;
@@ -165,6 +165,11 @@ export default function Drawer({
   const customWarnings = localCustom.warnings;
   const customGenres = localCustom.genres;
   const customTags = localCustom.tags;
+  const customFields = {
+    warnings: customWarnings,
+    genres: customGenres,
+    tags: customTags
+  };
   const addCustom = (kind, label) => {
     if (!rememberCustom(kind, label)) return;
     setLocalCustom((prev) => ({
@@ -208,7 +213,7 @@ export default function Drawer({
     let live = true;
     const t = setTimeout(
       () =>
-        searchSeries(q)
+        searchSeries(q, customFields)
           .then((rows) => live && setRes(rows))
           .catch(() => live && setRes([]))
           .finally(() => live && setBusy(false)),
@@ -253,14 +258,14 @@ export default function Drawer({
     // detail endpoint instead of ever calling anilistDetail() with a null id.
     if (r.anilist_id == null || r.anilist_id === "") {
       console.warn("Skipping AniList detail: picked series has no anilist_id.");
-      const full = await completeResult(r);
+      const full = await completeResult(r, customFields);
       if (seq !== pickSeq.current || full === r) return;
       setF((p) => mergePick(p, full));
       markWarningsIfNew(before, full);
       return;
     }
     try {
-      const d = await anilistDetail(r.anilist_id);
+      const d = await anilistDetail(r.anilist_id, customFields);
       if (seq !== pickSeq.current) return;
       setF((p) => mergeMissing(p, d));
       markWarningsIfNew(before, d);
@@ -279,7 +284,7 @@ export default function Drawer({
     setBusy(true);
     try {
       const before = fRef.current;
-      const d = await anilistDetail(f.anilist_id);
+      const d = await anilistDetail(f.anilist_id, customFields);
       setF((p) => mergeMissing(p, d));
       markWarningsIfNew(before, d);
       setChars((c) => [
@@ -294,9 +299,10 @@ export default function Drawer({
   };
   const save = () => {
     if (!f.title.trim()) return alert("Add a title first.");
+    const { _source_id, _ageRating, ...form } = f;
     onSave(
       {
-        ...f,
+        ...form,
         cover_url: httpUrl(f.cover_url) || null,
         genres: splitTags(f.genres),
         tags: splitTags(f.tags),
