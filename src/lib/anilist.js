@@ -198,24 +198,29 @@ function fillMissing(row, source) {
  * it stays blank until the owner types a URL. A failed lookup is announced
  * through the AniList notice event, but the row stays saveable.
  */
-export async function enrich(base) {
+export async function enrich(base, search = searchAniList) {
   let row = { ...base };
   let chars = [];
   try {
     let id = row.anilist_id;
     let found = null;
     if (!id) {
-      const matches = await searchAniList(row.title);
+      const matches = await search(row.title);
       const rn = norm(row.title);
       found =
         matches.find((match) => {
           const mn = norm(match.title);
           return mn && (mn.includes(rn) || rn.includes(mn));
         }) || null;
-      if (found) id = found.anilist_id;
+      if (found) {
+        row = fillMissing(row, found);
+        if (found.anilist_id != null && found.anilist_id !== "") {
+          id = found.anilist_id;
+          row.anilist_id = id;
+        }
+      }
     }
     if (id) {
-      row.anilist_id = id;
       row = fillMissing(row, found);
       const detail = await anilistDetail(id);
       row = fillMissing(row, detail);

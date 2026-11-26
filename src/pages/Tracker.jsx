@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { enrich, needsEnrichment } from "../lib/anilist";
+import { needsEnrichment } from "../lib/anilist";
+import { searchSeries } from "../lib/seriesSearch";
 import {
   addFriend,
   findExistingSeries,
@@ -204,7 +205,7 @@ export default function Tracker({ user, dark, setDark, th }) {
     let chs = chs0;
     if (needsEnrichment(rest)) {
       say("Filling in details…");
-      const e = await enrich(rest);
+      const e = await enrich(rest, searchSeries);
       rest = e.row;
     }
     if (!id) {

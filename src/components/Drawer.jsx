@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { anilistDetail, searchAniList } from "../lib/anilist";
+import { anilistDetail } from "../lib/anilist";
+import { searchSeries } from "../lib/seriesSearch";
 import { forgetCustom, rememberCustom } from "../lib/customPresets";
 import useOverlay from "../lib/useOverlay";
 import { GENRE_PRESETS, joinTags, splitTags, TROPE_PRESETS } from "../lib/tags";
@@ -206,7 +207,7 @@ export default function Drawer({
     let live = true;
     const t = setTimeout(
       () =>
-        searchAniList(q)
+        searchSeries(q)
           .then((rows) => live && setRes(rows))
           .catch(() => live && setRes([]))
           .finally(() => live && setBusy(false)),
@@ -243,6 +244,9 @@ export default function Drawer({
     }
     setRes([]);
     setQ("");
+    // MangaUpdates/Kitsu rows already carry the metadata; non-AniList results
+    // have no detail endpoint and must not trigger one with a null id.
+    if (r.anilist_id == null || r.anilist_id === "") return;
     anilistDetail(r.anilist_id)
       .then((d) => {
         const latest = fRef.current;
@@ -261,24 +265,23 @@ export default function Drawer({
     setBusy(true);
     try {
       let id = f.anilist_id;
-      let base = null;
       if (!id) {
-        const r = (await searchAniList(f.title))[0];
+        const r = (await searchSeries(f.title))[0];
         if (!r) {
-          notice("Could not find this title on AniList.");
+          notice("Could not find this title in any source.");
           return;
         }
         id = r.anilist_id;
-        base = r;
         const before = fRef.current;
-        setF((p) => ({ ...mergeMissing(p, base), anilist_id: id }));
+        setF((p) => ({ ...mergeMissing(p, r), anilist_id: id ?? null }));
         if (
           !parseWarnings(before.warnings).length &&
-          parseWarnings(base.warnings).length
+          parseWarnings(r.warnings).length
         ) {
-          markAutoWarnings(base.warnings);
+          markAutoWarnings(r.warnings);
         }
       }
+      if (!id) return;
       const d = await anilistDetail(id);
       const latest = fRef.current;
       setF((p) => mergeMissing(p, d));
@@ -350,7 +353,7 @@ export default function Drawer({
           <div className="relative">
             <input
               className="inp"
-              placeholder="Search AniList to auto-fill (e.g. Solo Leveling)"
+              placeholder="Search titles (AniList, MangaUpdates, Kitsu)"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -364,16 +367,27 @@ export default function Drawer({
                 {busy && <p className="p-3 text-sm opacity-60">Searching…</p>}
                 {res.map((r) => (
                   <button
-                    key={r.anilist_id}
+                    key={r.source + ":" + (r.anilist_id ?? norm(r.title))}
                     onClick={() => pick(r)}
                     className="flex gap-3 w-full text-left p-2 hover:bg-plum/10"
                   >
-                    <img src={r.cover_url} className="w-10 h-14 object-cover rounded" />
-                    <span>
+                    {r.cover_url ? (
+                      <img
+                        src={r.cover_url}
+                        alt={r.title + " cover"}
+                        className="w-10 h-14 object-cover rounded"
+                      />
+                    ) : (
+                      <span className="w-10 h-14 rounded bg-plum/10" />
+                    )}
+                    <span className="min-w-0 flex-1">
                       <b>{r.title}</b>
                       <br />
                       <span className="text-xs opacity-60">
                         {r.format} · {r.genres.slice(0, 3).join(", ")}
+                      </span>
+                      <span className="ml-2 rounded-full bg-plum/10 px-1.5 py-0.5 text-[10px] font-bold opacity-70">
+                        {r.source}
                       </span>
                     </span>
                   </button>
@@ -388,7 +402,7 @@ export default function Drawer({
             disabled={busy}
             className="w-full rounded-xl bg-plum/15 font-bold py-2 text-sm"
           >
-            {busy ? "Looking up…" : "↻ Auto-fill missing info from AniList"}
+            {busy ? "Looking up…" : "↻ Auto-fill missing info"}
           </button>
         )}
         <div className="flex gap-4">
