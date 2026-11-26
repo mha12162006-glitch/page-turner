@@ -27,6 +27,7 @@ const mockApis = (
     mangaUpdates = () => [],
     kitsu = () => [],
     webtoon = () => [],
+    webtoonDetail = () => ({}),
     muDetail = null,
     kitsuDetail = null,
     kitsuCategories = null,
@@ -37,9 +38,17 @@ const mockApis = (
   vi.fn(async (input, options = {}) => {
     const url = urlOf(input);
     if (url.includes("/api/webtoon-search")) {
+      const params = new URL(url, "http://localhost").searchParams;
+      if (params.has("url")) {
+        calls.webtoonDetail = (calls.webtoonDetail || 0) + 1;
+        calls.webtoonDetailUrls = [
+          ...(calls.webtoonDetailUrls || []),
+          params.get("url")
+        ];
+        return response({ result: webtoonDetail(params.get("url")) });
+      }
       calls.webtoon = (calls.webtoon || 0) + 1;
-      const q = new URL(url, "http://localhost").searchParams.get("q");
-      return response({ results: webtoon(q) });
+      return response({ results: webtoon(params.get("q")) });
     }
     if (url.includes("graphql.anilist.co")) {
       const body = JSON.parse(options.body);
@@ -567,6 +576,9 @@ describe("multi-source title search", () => {
               author: "Toffuo",
               genre: "Horror",
               webtoon_id: "7580",
+              webtoon_type: "ORIGINAL",
+              detail_url:
+                "https://www.webtoons.com/en/horror/house-pool/list?title_no=7580",
               type: "Webtoon"
             }
           ]
@@ -579,10 +591,11 @@ describe("multi-source title search", () => {
     expect(row.source).toBe("WEBTOON");
     expect(row.anilist_id).toBe(null);
     expect(row._source_id).toBe("7580");
+    expect(row._detail_url).toContain("title_no=7580");
     expect(row.format).toBe("Webtoon");
     expect(row.title).toBe("Don't Enter the House Pool");
     expect(row.cover_url).toBe("https://webtoon-phinf.pstatic.net/thumb.jpg");
-    expect(row.synopsis).toContain("WEBTOON Horror series by Toffuo.");
+    expect(row.synopsis).toBe("");
     expect(row.genres).toEqual(["Horror"]);
     expect(row.chapter).toBe(0);
     expect(row.total_chapters).toBe(null);
@@ -614,8 +627,128 @@ describe("multi-source title search", () => {
     expect(row.genres).toEqual([]);
     expect(row.tags).toEqual([]);
     expect(row.warnings).toBe("");
-    expect(row.synopsis).toBe("WEBTOON Canvas series by IsaacTheRaccoon.");
+    expect(row.synopsis).toBe("");
     expect(row.read_url ?? "").toBe("");
+  });
+
+  it("scrapes the real WEBTOON detail page and maps full metadata", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          kitsu: () => [],
+          webtoonDetail: (url) =>
+            url.includes("title_no=7580")
+              ? {
+                  title: "Don't Enter the House Pool",
+                  cover_url:
+                    "https://swebtoon-phinf.pstatic.net/20251028_127/poster.jpg",
+                  genres: ["Horror"],
+                  tags: ["Drama", "Magical Story", "Underdog Story"],
+                  synopsis:
+                    "Jasha is magicless at a royal academy of White Magic. A brutal murder and a war between houses follow; he is reborn with a second chance.",
+                  pub_status: "Ongoing",
+                  total_chapters: 39,
+                  webtoon_id: "7580",
+                  webtoon_type: "ORIGINAL",
+                  detail_url:
+                    "https://www.webtoons.com/en/horror/house-pool/list?title_no=7580"
+                }
+              : {}
+        },
+        calls
+      )
+    );
+    const picked = {
+      source: "WEBTOON",
+      _source_id: "7580",
+      _detail_url:
+        "https://www.webtoons.com/en/horror/house-pool/list?title_no=7580",
+      _webtoon_type: "ORIGINAL",
+      _ageRating: "",
+      anilist_id: null,
+      title: "Don't Enter the House Pool",
+      cover_url: "https://webtoon-phinf.pstatic.net/thumb.jpg",
+      synopsis: "",
+      pub_status: "",
+      genres: ["Horror"],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    };
+    const full = await completeResult(picked);
+    expect(calls.webtoonDetail).toBe(1);
+    expect(calls.webtoonDetailUrls[0]).toContain("title_no=7580");
+    expect(full.title).toBe("Don't Enter the House Pool");
+    expect(full.pub_status).toBe("Ongoing");
+    expect(full.total_chapters).toBe(39);
+    expect(full.synopsis).toContain("brutal murder and a war");
+    expect(full.genres).toEqual(["Horror", "Fantasy"]);
+    expect(full.tags).toEqual([
+      "Reincarnation / Regression",
+      "Historical / Royalty",
+      "Academy / School"
+    ]);
+    expect(full.warnings).toBe("Violence, Bullying, War");
+    expect(full.read_url ?? "").toBe("");
+    expect(full.format).toBe("Webtoon");
+    expect(full.anilist_id).toBe(null);
+  });
+
+  it("fills Canvas details without inventing a placeholder synopsis", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          kitsu: () => [],
+          webtoonDetail: () => ({
+            title: "City of Light",
+            cover_url:
+              "https://swebtoon-phinf.pstatic.net/20210806_61/thumbnail.jpg",
+            genres: ["Fantasy", "Horror"],
+            synopsis:
+              "The following events were captured on the dragon home of Sol during a brutal war; a reborn guard fights back.",
+            pub_status: "Completed",
+            total_chapters: 8,
+            webtoon_id: "674475",
+            webtoon_type: "CANVAS",
+            detail_url:
+              "https://www.webtoons.com/en/canvas/city-of-light/list?title_no=674475"
+          })
+        },
+        calls
+      )
+    );
+    const full = await completeResult({
+      source: "WEBTOON",
+      _source_id: "674475",
+      _detail_url:
+        "https://www.webtoons.com/en/canvas/city-of-light/list?title_no=674475",
+      anilist_id: null,
+      title: "City of Light",
+      synopsis: "",
+      genres: [],
+      tags: [],
+      warnings: "",
+      total_chapters: null,
+      read_url: ""
+    });
+    expect(calls.webtoonDetail).toBe(1);
+    expect(full.pub_status).toBe("Completed");
+    expect(full.total_chapters).toBe(8);
+    expect(full.genres).toContain("Fantasy");
+    expect(full.genres).toContain("Horror");
+    expect(full.tags).toContain("Reincarnation / Regression");
+    expect(full.warnings).toBe("Violence, War");
+    expect(full.read_url ?? "").toBe("");
+    expect(full.synopsis).not.toMatch(/webtoon made by|--/i);
   });
 
   it("deduplicates a title found everywhere and keeps the AniList id", async () => {

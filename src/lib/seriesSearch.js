@@ -2,7 +2,7 @@ import { searchAniList, cleanSyn } from "./anilist";
 import { mapAutoFields } from "./autoTags";
 import { joinTags, splitTags } from "./tags";
 import { joinWarnings } from "./warnings";
-import { detectFormat, norm } from "./util";
+import { detectFormat, isPlaceholderSynopsis, norm, proxyCover } from "./util";
 
 /**
  * Title search across four free sources. AniList stays first so existing
@@ -90,7 +90,9 @@ function standard({
     ...categoryNames(categories),
     ...categoryNames(labels)
   ];
-  const clean = cleanDescription(synopsis);
+  const clean = isPlaceholderSynopsis(synopsis)
+    ? ""
+    : cleanDescription(synopsis);
   const mapped = mapAutoFields({
     labels: names,
     tags: warningTags || names.map((name) => ({ name, rank: 80 })),
@@ -103,7 +105,7 @@ function standard({
   return {
     anilist_id,
     title: text(title),
-    cover_url: text(cover_url),
+    cover_url: proxyCover(text(cover_url)),
     format: text(format) || detectFormat({ type, subtype, country, labels: names }),
     pub_status: pubStatus(pub_status),
     genres: mapped.genres,
@@ -127,10 +129,14 @@ const unionChips = (a, b) =>
 function fillFrom(row, extra) {
   const out = { ...row };
   if (!text(out.title) && text(extra?.title)) out.title = extra.title;
-  if (!text(out.cover_url) && text(extra?.cover_url)) {
-    out.cover_url = extra.cover_url;
+  // A detail page's og:image is the canonical cover, so it wins over the small
+  // search thumbnail when present.
+  if (text(extra?.cover_url)) out.cover_url = extra.cover_url;
+  // Detail endpoints carry the full description; a short autocomplete sentence
+  // must never win once the real page has been scraped.
+  if (text(extra?.synopsis) && !isPlaceholderSynopsis(extra.synopsis)) {
+    out.synopsis = extra.synopsis;
   }
-  if (!text(out.synopsis) && text(extra?.synopsis)) out.synopsis = extra.synopsis;
   if (!text(out.pub_status) && text(extra?.pub_status)) {
     out.pub_status = extra.pub_status;
   }
@@ -247,10 +253,9 @@ export async function searchKitsu(query, custom = {}) {
 }
 
 /**
- * Direct WEBTOON results come from our own /api/webtoon-search function, which
- * is a Vercel handler locally mirrored by a Vite middleware. The compact
- * synopsis gives the shared mapper a genre/author pool without inventing any
- * long source sentences, and read_url is deliberately left untouched.
+ * Search rows are deliberately sparse: WEBTOON's autocomplete has no real
+ * description, so we keep synopsis empty and let the detail call fill it. The
+ * server supplies everything needed to scrape the actual page later.
  */
 export async function searchWebtoon(query, custom = {}) {
   const data = await jsonGet(
@@ -260,34 +265,31 @@ export async function searchWebtoon(query, custom = {}) {
   return asArray(data?.results)
     .map((r) => {
       const genre = text(r.genre);
-      const author = text(r.author);
-      const labels = [genre, author].filter(Boolean);
-      const synopsis =
-        text(r.synopsis) ||
-        [
-          genre ? "WEBTOON " + genre + " series" : "WEBTOON series",
-          author ? "by " + author + "." : ""
-        ]
-          .filter(Boolean)
-          .join(" ");
-      return standard({
+      const labels = [genre, text(r.author)].filter(Boolean);
+      const row = standard({
         title: r.title,
         cover_url: r.cover_url,
-        synopsis,
+        synopsis: text(r.synopsis),
         genres: genre ? [genre] : [],
         labels,
         format: "Webtoon",
         source_id: r.webtoon_id,
         custom
       });
+      return {
+        ...row,
+        _detail_url: text(r.detail_url),
+        _webtoon_type: text(r.webtoon_type) || "ORIGINAL"
+      };
     })
     .filter((row) => row.title);
 }
 
-/** MangaUpdates/Kitsu picks always have a detail endpoint worth checking. */
+/** Every non-AniList source has a detail endpoint worth checking. */
 export function needsSeriesDetail(row = {}) {
   return (
-    !!text(row._source_id) && ["MangaUpdates", "Kitsu"].includes(row.source)
+    !!text(row._source_id) &&
+    ["MangaUpdates", "Kitsu", "WEBTOON"].includes(row.source)
   );
 }
 
@@ -301,6 +303,51 @@ export function needsSeriesDetail(row = {}) {
 export async function completeResult(row, custom = {}) {
   if (!needsSeriesDetail(row)) return row;
   try {
+    if (row.source === "WEBTOON") {
+      const fallbackUrl = text(row._source_id)
+        ? "https://www.webtoons.com/en/detail/series/list?title_no=" +
+          encodeURIComponent(row._source_id)
+        : "";
+      const detailUrl = text(row._detail_url) || fallbackUrl;
+      if (!detailUrl) return row;
+      const data = await jsonGet(
+        "/api/webtoon-search?url=" + encodeURIComponent(detailUrl),
+        { headers: { Accept: "application/json" } }
+      );
+      const d = data?.result || {};
+      if (!text(d.title) && !text(d.synopsis)) return row;
+      const genres = [
+        ...asArray(d.genres).map(text),
+        ...genreNames(row.genres)
+      ].filter(Boolean);
+      // The mobile page's own tag box is part of the detail payload. Pass it
+      // as tags (not genres/labels) so it can derive curated tropes/warnings
+      // without turning a story tag such as "Drama" into a genre chip.
+      const webtoonTags = asArray(d.tags)
+        .map(text)
+        .filter(Boolean)
+        .map((name) => ({ name, rank: 80 }));
+      const extra = standard({
+        title: d.title || row.title,
+        cover_url: d.cover_url || row.cover_url,
+        // The server never invents descriptions. An empty string keeps the
+        // search row clean instead of persisting a placeholder.
+        synopsis: text(d.synopsis),
+        pub_status: d.pub_status || row.pub_status,
+        genres,
+        categories: genres,
+        labels: genres,
+        warningTags: webtoonTags,
+        total_chapters: d.total_chapters,
+        format: "Webtoon",
+        source_id: d.webtoon_id || row._source_id,
+        custom
+      });
+      const out = fillFrom(row, extra);
+      out._detail_url = text(d.detail_url) || detailUrl;
+      out._webtoon_type = text(d.webtoon_type) || row._webtoon_type || "ORIGINAL";
+      return out;
+    }
     if (row.source === "MangaUpdates") {
       const d = await jsonGet(
         "https://api.mangaupdates.com/v1/series/" +

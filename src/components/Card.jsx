@@ -1,4 +1,4 @@
-import { isHttp, STAT } from "../lib/util";
+import { isHttp, proxyCover, STAT } from "../lib/util";
 import Avatar from "./Avatar";
 import SpoilerText from "./SpoilerText";
 import Stars from "./Stars";
@@ -65,9 +65,10 @@ export default function Card({
       <div className="relative aspect-[2/3] bg-plum/10">
         {isHttp(s.cover_url) ? (
           <img
-            src={s.cover_url}
+            src={proxyCover(s.cover_url)}
             alt=""
             loading="lazy"
+            referrerPolicy="no-referrer"
             className="w-full h-full object-cover"
           />
         ) : (

@@ -126,7 +126,12 @@ export function mapTagsToWarnings(
   ) {
     found.add("Self-Harm");
   }
-  if (has(/bully|bullying|harassment/i, ["bullying", "harassment"])) {
+  if (
+    has(
+      /bully|bullying|harassment|underdog|remind[^.!?;]*faults/i,
+      ["bullying", "harassment", "underdog", "underdog story"]
+    )
+  ) {
     found.add("Bullying");
   }
   if (

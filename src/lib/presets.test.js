@@ -43,7 +43,8 @@ const CLEAN = {
     "Murim / Martial Arts",
     "System / Dungeons",
     "Contract Marriage",
-    "Historical / Royalty"
+    "Historical / Royalty",
+    "Academy / School"
   ]
 };
 

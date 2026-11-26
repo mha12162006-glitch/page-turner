@@ -40,6 +40,18 @@ describe("shared auto-fill mapping", () => {
     expect(mapped.warnings).toBe("Violence, Nudity / Ecchi, War");
   });
 
+  it("maps WEBTOON academy tags and synopsis into curated chips", () => {
+    const mapped = mapAutoFields({
+      labels: ["Horror", "Drama", "Magical Story", "Underdog Story"],
+      genres: ["Horror"],
+      synopsis:
+        "Jasha is magicless. Adopted into an all-girls academy, his classmates are eager to remind him his faults daily."
+    });
+    expect(mapped.genres).toEqual(["Drama", "Fantasy", "Horror"]);
+    expect(mapped.tags).toEqual(["Academy / School"]);
+    expect(mapped.warnings).toBe("Bullying");
+  });
+
   it("ignores negated warning phrases", () => {
     const mapped = mapAutoFields({
       synopsis: "No sexual violence or self-harm appears in this gentle story."

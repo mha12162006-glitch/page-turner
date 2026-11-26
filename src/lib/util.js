@@ -91,6 +91,33 @@ export const same = (a, b) => {
 export const isHttp = (u) => /^https?:\/\//i.test((u || "").trim());
 export const httpUrl = (u) => (isHttp(u) ? u.trim() : "");
 
+/**
+ * WEBTOON's image CDN answers browser <img> requests with 403 because an <img>
+ * cannot set the required Referer. Rewrite every WEBTOON-owned cover (CDN or
+ * webtoons.com) to our same-origin proxy; the server adds the Referer and
+ * streams the bytes. Already-proxied URLs are left alone. In Node tests (no
+ * window) the source URL is untouched so payload assertions stay readable.
+ */
+const isProxiedCover = (value) =>
+  /\/api\/webtoon-search\?imageUrl=/i.test(String(value || ""));
+
+export const proxyCover = (u) => {
+  const raw = String(u ?? "").trim();
+  if (isProxiedCover(raw)) return raw;
+  const url = httpUrl(raw);
+  if (!url || typeof window === "undefined") return url;
+  if (!/pstatic\.net|webtoons\.com/i.test(url)) return url;
+  return (
+    window.location.origin +
+    "/api/webtoon-search?imageUrl=" +
+    encodeURIComponent(url)
+  );
+};
+
+/** Never let an autocomplete placeholder become a saved synopsis. */
+export const isPlaceholderSynopsis = (value) =>
+  /a\s+webtoon\s+made\s+by[\s-]*-+/i.test(String(value ?? ""));
+
 const charKey = (c) =>
   [norm(c.name), (c.image_url || "").trim(), (c.comment || "").trim()].join("|");
 

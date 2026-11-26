@@ -11,8 +11,10 @@ import {
   httpUrl,
   isHttp,
   isImg,
+  isPlaceholderSynopsis,
   norm,
   num,
+  proxyCover,
   PUB,
   same,
   STATUS,
@@ -46,45 +48,6 @@ const sameLabel = (a, b) =>
   String(b || "")
     .trim()
     .toLowerCase();
-
-function mergeMissing(row, data) {
-  if (!data) return row;
-  const next = { ...row };
-  if (!hasText(next.cover_url) && hasText(data.cover_url)) {
-    next.cover_url = data.cover_url;
-  }
-  if (!hasText(next.synopsis) && hasText(data.synopsis)) {
-    next.synopsis = data.synopsis;
-  }
-  if (!hasText(next.pub_status) && hasText(data.pub_status)) {
-    next.pub_status = data.pub_status;
-  }
-  if (splitTags(data.genres).length) {
-    next.genres = joinTags([...splitTags(next.genres), ...splitTags(data.genres)]);
-  }
-  if (splitTags(data.tags).length) {
-    next.tags = joinTags([...splitTags(next.tags), ...splitTags(data.tags)]);
-  }
-  if (hasText(data.warnings)) {
-    next.warnings = joinWarnings([next.warnings, data.warnings]);
-  }
-  // Detail endpoints are authoritative for the released-chapter total.
-  if (data.total_chapters != null) next.total_chapters = data.total_chapters;
-  if (next.chapter == null && data.chapter != null) next.chapter = data.chapter;
-  return next;
-}
-
-function mergePick(row, result) {
-  const next = {
-    ...row,
-    anilist_id: result.anilist_id,
-    title: result.title || row.title,
-    cover_url: result.cover_url || row.cover_url,
-    format: result.format || row.format,
-    pub_status: result.pub_status || row.pub_status
-  };
-  return mergeMissing(next, result);
-}
 
 function Auto({ value, ...p }) {
   const r = useRef();
@@ -153,6 +116,57 @@ export default function Drawer({
     fRef.current = f;
   }, [f]);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  /**
+   * One entry point for every source. Search rows and detail responses are
+   * normalized before they reach here, so AniList, MangaUpdates, Kitsu and
+   * WEBTOON all fill the same fields in exactly the same way.
+   */
+  const applyMetadataToForm = (metadata) => {
+    if (!metadata) return;
+    setF((prev) => {
+      const next = { ...prev };
+      if (hasText(metadata.anilist_id)) next.anilist_id = metadata.anilist_id;
+      else if (metadata.anilist_id === null) next.anilist_id = null;
+      if (hasText(metadata.title)) next.title = metadata.title;
+      if (hasText(metadata.cover_url)) {
+        next.cover_url = proxyCover(metadata.cover_url);
+      }
+      if (hasText(metadata.format)) next.format = metadata.format;
+      const synopsis = String(metadata.synopsis || "");
+      if (hasText(synopsis) && !isPlaceholderSynopsis(synopsis)) {
+        next.synopsis = synopsis;
+      }
+      if (hasText(metadata.pub_status)) next.pub_status = metadata.pub_status;
+      if (metadata.total_chapters != null) {
+        next.total_chapters = metadata.total_chapters;
+      }
+      if (metadata.chapter != null) next.chapter = metadata.chapter;
+      next.genres = joinTags([
+        ...splitTags(next.genres),
+        ...splitTags(metadata.genres)
+      ]);
+      next.tags = joinTags([
+        ...splitTags(next.tags),
+        ...splitTags(metadata.tags)
+      ]);
+      next.warnings = joinWarnings([next.warnings, metadata.warnings]);
+      // Reading links are always the user's own choice; no API sets one.
+      if (!hasText(next.read_url)) next.read_url = "";
+      // Lookup metadata stays in drawer state only and is stripped on save.
+      for (const key of [
+        "_source_id",
+        "_detail_url",
+        "_webtoon_type",
+        "_ageRating"
+      ]) {
+        if (metadata[key] !== undefined) next[key] = metadata[key];
+      }
+      if (metadata.source !== undefined) next._source = metadata.source;
+      return next;
+    });
+  };
+
   const initialCustom = () => ({
     warnings: custom?.warnings || [],
     genres: custom?.genres || [],
@@ -250,24 +264,24 @@ export default function Drawer({
   const pick = async (r) => {
     const seq = ++pickSeq.current;
     const before = fRef.current;
-    setF((p) => mergePick(p, r));
+    applyMetadataToForm(r);
     markWarningsIfNew(before, r);
     setRes([]);
     setQ("");
-    // MangaUpdates/Kitsu rows have no AniList id: finish them from their own
-    // detail endpoint instead of ever calling anilistDetail() with a null id.
+    // Non-AniList rows carry their own source id. Their detail endpoint is
+    // authoritative, and anilistDetail() is never called with a null id.
     if (r.anilist_id == null || r.anilist_id === "") {
       console.warn("Skipping AniList detail: picked series has no anilist_id.");
       const full = await completeResult(r, customFields);
       if (seq !== pickSeq.current || full === r) return;
-      setF((p) => mergePick(p, full));
+      applyMetadataToForm(full);
       markWarningsIfNew(before, full);
       return;
     }
     try {
       const d = await anilistDetail(r.anilist_id, customFields);
       if (seq !== pickSeq.current) return;
-      setF((p) => mergeMissing(p, d));
+      applyMetadataToForm(d);
       markWarningsIfNew(before, d);
       setChars((c) => (c.length ? c : d.chars));
     } catch (e) {
@@ -275,17 +289,31 @@ export default function Drawer({
     }
   };
   const fill = async () => {
-    // No AniList id means there is no AniList detail to fetch. Manual entries
-    // and non-AniList picks are already complete and stay untouched.
-    if (f.anilist_id == null || f.anilist_id === "") {
-      console.warn("Skipping AniList auto-fill: no anilist_id on this series.");
+    const before = fRef.current;
+    if (before.anilist_id == null || before.anilist_id === "") {
+      if (!before._source_id) {
+        console.warn("Skipping auto-fill: no source id on this series.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const full = await completeResult(
+          { ...before, source: before._source },
+          customFields
+        );
+        applyMetadataToForm(full);
+        markWarningsIfNew(before, full);
+      } catch (e) {
+        console.warn("Auto-fill failed:", e.message);
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     setBusy(true);
     try {
-      const before = fRef.current;
-      const d = await anilistDetail(f.anilist_id, customFields);
-      setF((p) => mergeMissing(p, d));
+      const d = await anilistDetail(before.anilist_id, customFields);
+      applyMetadataToForm(d);
       markWarningsIfNew(before, d);
       setChars((c) => [
         ...c,
@@ -299,7 +327,14 @@ export default function Drawer({
   };
   const save = () => {
     if (!f.title.trim()) return alert("Add a title first.");
-    const { _source_id, _ageRating, ...form } = f;
+    const {
+      _source,
+      _source_id,
+      _detail_url,
+      _webtoon_type,
+      _ageRating,
+      ...form
+    } = f;
     onSave(
       {
         ...form,
@@ -370,8 +405,9 @@ export default function Drawer({
                   >
                     {r.cover_url ? (
                       <img
-                        src={r.cover_url}
+                        src={proxyCover(r.cover_url)}
                         alt={r.title + " cover"}
+                        referrerPolicy="no-referrer"
                         className="w-10 h-14 object-cover rounded"
                       />
                     ) : (
@@ -433,7 +469,8 @@ export default function Drawer({
         <div className="flex gap-4">
           {isHttp(f.cover_url) && (
             <img
-              src={f.cover_url}
+              src={proxyCover(f.cover_url)}
+              referrerPolicy="no-referrer"
               className="w-28 rounded-xl object-cover aspect-[2/3]"
             />
           )}

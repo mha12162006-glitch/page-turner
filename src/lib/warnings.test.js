@@ -87,6 +87,25 @@ describe("mapTagsToWarnings", () => {
     ).toEqual(["Violence", "Child / Domestic Abuse"]);
   });
 
+  it("detects bullying from WEBTOON tags and synopsis wording", () => {
+    expect(
+      mapTagsToWarnings(
+        [tag("Underdog Story", 80)],
+        ["Horror"],
+        false,
+        "His classmates are eager to remind him his faults daily."
+      )
+    ).toEqual(["Bullying"]);
+    expect(
+      mapTagsToWarnings(
+        [],
+        ["Horror"],
+        false,
+        "His classmates are eager to remind him his faults daily."
+      )
+    ).toEqual(["Bullying"]);
+  });
+
   it("only ever auto-fills clean built-in labels, never raw tag sentences", () => {
     const messy = [
       { name: "poisoning/assassination attempts", rank: 90 },

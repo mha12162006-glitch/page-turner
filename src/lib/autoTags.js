@@ -33,10 +33,13 @@ export function mapAutoFields({
   custom = {}
 } = {}) {
   const names = [...labels, ...tags, ...genres].map(nameOf).filter(Boolean);
+  // Story tags such as "Drama" can seed warnings/tropes, but only declared
+  // genres and labels should become genre chips.
+  const genreNames = [...labels, ...genres].map(nameOf).filter(Boolean);
   const clean = String(synopsis || "");
   const pool = [...names, clean].join(" ");
   const found = {
-    genres: mapGenres(names, clean),
+    genres: mapGenres(genreNames, clean),
     tags: mapTropes(names, clean),
     warnings: mapTagsToWarnings(
       tags,

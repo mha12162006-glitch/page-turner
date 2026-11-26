@@ -23,7 +23,8 @@ export const TROPE_PRESETS = Object.freeze([
   "Murim / Martial Arts",
   "System / Dungeons",
   "Contract Marriage",
-  "Historical / Royalty"
+  "Historical / Royalty",
+  "Academy / School"
 ]);
 
 const asArray = (value) =>
@@ -116,6 +117,11 @@ const TROPE_MATCHERS = [
     "Historical / Royalty",
     /historical|royalt(?:y|ies)|royal|nobilit(?:y|ies)|\bnoble|monarch|kingdom|empire|emperor|empress|prince(?:ss)?|aristocrat|(?:royal|imperial|noble) academy/i,
     ["historical", "royalty", "royal", "nobility", "noble", "monarch", "kingdom", "empire", "emperor", "empress", "prince", "princess", "aristocrat"]
+  ],
+  [
+    "Academy / School",
+    /academ(?:y|ies)|school|students?|classmates?/i,
+    ["academy", "school", "student", "classmate"]
   ]
 ];
 
