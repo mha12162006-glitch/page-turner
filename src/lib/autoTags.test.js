@@ -84,6 +84,28 @@ describe("shared auto-fill mapping", () => {
     expect(mapped.warnings).toBe("Grief");
   });
 
+  it("auto-tags a pasted villainess/ice-prince synopsis with curated chips", () => {
+    const mapped = mapAutoFields({
+      labels: [
+        "The Villainess Licks the Ice Prince Clean",
+        "Fantasy",
+        "Romance"
+      ],
+      genres: ["Fantasy", "Romance"],
+      synopsis:
+        "In a fantasy romance, Koyuki is reincarnated as the villainess Freesia. The Ice Prince plots her murder, and a brutal execution awaits if she cannot escape."
+    });
+    expect(mapped.genres).toEqual(["Fantasy", "Romance"]);
+    expect(mapped.tags).toEqual(
+      expect.arrayContaining([
+        "Reincarnation / Regression",
+        "Villainess",
+        "Historical / Royalty"
+      ])
+    );
+    expect(mapped.warnings.split(", ")).toContain("Violence");
+  });
+
   it("only ever returns built-in chips", () => {
     const mapped = mapAutoFields({
       labels: ["Webtoon", "Some messy uncategorised tag", "Isekai"],

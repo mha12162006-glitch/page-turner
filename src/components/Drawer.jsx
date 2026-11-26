@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { anilistDetail } from "../lib/anilist";
+import { mapAutoFields } from "../lib/autoTags";
 import { completeResult, searchSeries } from "../lib/seriesSearch";
 import { forgetCustom, rememberCustom } from "../lib/customPresets";
 import useOverlay from "../lib/useOverlay";
@@ -9,6 +10,7 @@ import {
   blank,
   FORMATS,
   httpUrl,
+  imageProxyUrl,
   isHttp,
   isImg,
   isPlaceholderSynopsis,
@@ -111,6 +113,8 @@ export default function Drawer({
   const [q, setQ] = useState("");
   const [res, setRes] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+  const [coverPreview, setCoverPreview] = useState({ source: "", src: "" });
   const [autoWarnings, setAutoWarnings] = useState("");
   const [warnTouched, setWarnTouched] = useState(false);
   const fRef = useRef(f);
@@ -151,9 +155,9 @@ export default function Drawer({
   requestCloseRef.current = requestClose;
 
   /**
-   * One entry point for every source. Search rows and detail responses are
-   * normalized before they reach here, so AniList, MangaUpdates, Kitsu,
-   * WEBTOON, MangaDex and Comix all fill the same fields in exactly the same way.
+   * One entry point for every source. Search rows, detail responses and the
+   * smart-paste matcher all feed the same curated chip fields, so AniList,
+   * MangaUpdates, Kitsu, WEBTOON, MangaDex, MAL and manual entries behave alike.
    */
   const applyMetadataToForm = (metadata) => {
     if (!metadata) return;
@@ -217,6 +221,87 @@ export default function Drawer({
     genres: customGenres,
     tags: customTags
   };
+
+  /** Run the current title + synopsis through the shared curated-chip mapper. */
+  const autoTagFromSynopsis = (source = fRef.current) => {
+    const title = String(source.title || "").trim();
+    const synopsis = String(source.synopsis || "").trim();
+    if (!title && !synopsis) return;
+    const mapped = mapAutoFields({
+      labels: [
+        title,
+        ...splitTags(source.genres),
+        ...splitTags(source.tags)
+      ],
+      genres: splitTags(source.genres),
+      tags: splitTags(source.tags),
+      synopsis: [title, synopsis].filter(Boolean).join("\n"),
+      custom: customFields
+    });
+    applyMetadataToForm({
+      genres: mapped.genres,
+      tags: mapped.tags,
+      warnings: mapped.warnings
+    });
+    markAutoWarnings(mapped.warnings);
+  };
+
+  /**
+   * Quick-fill for fan-translation posts: recognize labelled lines, a cover
+   * URL and free-form notes. Reading links are deliberately never copied in.
+   */
+  const applyPastedInfo = () => {
+    const lines = pasteText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (!lines.length) return;
+    let title = "";
+    let synopsis = "";
+    let cover = "";
+    for (const line of lines) {
+      const labelled = line.match(/^(title|synopsis|cover)\s*:\s*(.+)$/i);
+      if (labelled) {
+        const value = labelled[2].trim();
+        if (/^title$/i.test(labelled[1])) title = value;
+        else if (/^cover$/i.test(labelled[1])) cover = value;
+        else synopsis = [synopsis, value].filter(Boolean).join("\n");
+      } else if (/^https?:\/\/\S+$/i.test(line) && !cover) {
+        cover = line;
+      } else if (!title && !hasText(fRef.current.title)) {
+        title = line;
+      } else {
+        synopsis = [synopsis, line].filter(Boolean).join("\n");
+      }
+    }
+    const current = fRef.current;
+    const next = { ...current };
+    if (title) next.title = title;
+    if (cover) next.cover_url = cover;
+    if (synopsis) {
+      next.synopsis = hasText(next.synopsis)
+        ? next.synopsis + "\n" + synopsis
+        : synopsis;
+    }
+    fRef.current = next;
+    setF(next);
+    setPasteText("");
+    autoTagFromSynopsis(next);
+  };
+
+  const coverSource = httpUrl(f.cover_url);
+  const shownCover =
+    coverPreview.source === coverSource
+      ? coverPreview.src
+      : coverSource
+        ? proxyCover(coverSource)
+        : "";
+  useEffect(() => {
+    if (coverSource && coverPreview.source !== coverSource) {
+      setCoverPreview({ source: coverSource, src: proxyCover(coverSource) });
+    }
+  }, [coverSource, coverPreview.source]);
+
   const addCustom = (kind, label) => {
     if (!rememberCustom(kind, label)) return;
     setLocalCustom((prev) => ({
@@ -427,7 +512,7 @@ export default function Drawer({
           <div className="relative">
             <input
               className="inp"
-              placeholder="Search titles (AniList, MangaUpdates, Kitsu, WEBTOON, MangaDex, Comix)"
+              placeholder="Search titles (AniList, MangaUpdates, Kitsu, WEBTOON, MangaDex, MAL)"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -468,8 +553,8 @@ export default function Drawer({
                             ? "bg-blue-500/15"
                             : r.source === "MangaDex"
                               ? "bg-emerald-500/15"
-                              : r.source === "Comix"
-                                ? "bg-amber-500/15"
+                              : r.source === "MAL"
+                                ? "bg-sky-500/15"
                                 : "bg-plum/10")
                         }
                       >
@@ -515,10 +600,20 @@ export default function Drawer({
           </button>
         )}
         <div className="flex gap-4">
-          {isHttp(f.cover_url) && (
+          {shownCover && (
             <img
-              src={proxyCover(f.cover_url)}
+              src={shownCover}
+              alt={f.title ? f.title + " cover" : "Cover preview"}
               referrerPolicy="no-referrer"
+              onError={() => {
+                // A pasted URL may need our Referer-bearing proxy to render.
+                if (coverSource && shownCover !== imageProxyUrl(coverSource)) {
+                  setCoverPreview({
+                    source: coverSource,
+                    src: imageProxyUrl(coverSource)
+                  });
+                }
+              }}
               className="w-28 rounded-xl object-cover aspect-[2/3]"
             />
           )}
@@ -533,12 +628,27 @@ export default function Drawer({
             </L>
             <L t="Cover image URL">
               <input
+                aria-label="Cover image URL"
                 className="inp"
                 value={f.cover_url || ""}
                 disabled={readOnly}
                 onChange={(e) => set("cover_url", e.target.value)}
               />
             </L>
+            {!readOnly && coverSource && (
+              <button
+                type="button"
+                onClick={() =>
+                  setCoverPreview({
+                    source: coverSource,
+                    src: imageProxyUrl(coverSource)
+                  })
+                }
+                className="-mt-2 text-xs font-semibold text-plum underline"
+              >
+                Preview through proxy
+              </button>
+            )}
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -717,6 +827,48 @@ export default function Drawer({
             onChange={(e) => set("synopsis", e.target.value)}
           />
         </L>
+        {!readOnly && (
+          <div className="rounded-2xl bg-plum/10 p-4 space-y-2">
+            <div>
+              <p className="font-bold">✨ Smart paste / auto-tag</p>
+              <p className="text-xs opacity-70">
+                Paste a fan-translation blurb or cover link from anywhere, then
+                fill every matching built-in chip.
+              </p>
+            </div>
+            <L t="Paste info / link (optional)">
+              <textarea
+                className="inp"
+                rows={3}
+                value={pasteText}
+                placeholder={
+                  "Title: The Villainess Licks the Ice Prince Clean\n" +
+                  "Cover: https://example.com/cover.jpg\n" +
+                  "A villainess is reincarnated and accused of murder..."
+                }
+                onChange={(e) => setPasteText(e.target.value)}
+              />
+            </L>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={applyPastedInfo}
+                disabled={!pasteText.trim()}
+                className="rounded-xl bg-plum/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
+              >
+                ⤓ Use pasted info
+              </button>
+              <button
+                type="button"
+                onClick={() => autoTagFromSynopsis()}
+                disabled={!String(f.title || "").trim() && !String(f.synopsis || "").trim()}
+                className="rounded-xl bg-plum text-white px-4 py-2 text-sm font-bold disabled:opacity-50"
+              >
+                ✨ Auto-fill Tags from Synopsis
+              </button>
+            </div>
+          </div>
+        )}
         <ChipPicker
           title="Content / trigger warnings"
           presets={WARNING_PRESETS}

@@ -92,11 +92,24 @@ export const isHttp = (u) => /^https?:\/\//i.test((u || "").trim());
 export const httpUrl = (u) => (isHttp(u) ? u.trim() : "");
 
 /**
- * WEBTOON's image CDN and Comix covers answer browser <img> requests without
- * the headers they expect. Rewrite those covers to our same-origin proxy; the
- * server adds the Referer and streams the bytes. Already-proxied URLs are left
- * alone. In Node tests (no window) the source URL is untouched so payload
- * assertions stay readable.
+ * Build the same-origin proxy URL for any direct image. This is used as the
+ * fallback when a pasted cover rejects a plain browser <img> request.
+ */
+export const imageProxyUrl = (u) => {
+  const url = httpUrl(u);
+  if (!url || typeof window === "undefined") return url;
+  return (
+    window.location.origin +
+    "/api/webtoon-search?imageUrl=" +
+    encodeURIComponent(url)
+  );
+};
+
+/**
+ * WEBTOON's CDN answers browser <img> requests without the headers it expects.
+ * Rewrite those covers up front; other pasted URLs try the browser first and
+ * fall back to imageProxyUrl() only if the image fails. Already-proxied URLs
+ * are left alone. In Node tests (no window) the source URL is untouched.
  */
 const isProxiedCover = (value) =>
   /\/api\/webtoon-search\?imageUrl=/i.test(String(value || ""));
@@ -106,19 +119,8 @@ export const proxyCover = (u) => {
   if (isProxiedCover(raw)) return raw;
   const url = httpUrl(raw);
   if (!url || typeof window === "undefined") return url;
-  let isComix = false;
-  try {
-    isComix = /(^|\.)comix\.to$/i.test(new URL(url).hostname);
-  } catch {
-    isComix = false;
-  }
-  if (!isComix && !/pstatic\.net|webtoons\.com/i.test(url)) return url;
-  return (
-    window.location.origin +
-    "/api/webtoon-search" +
-    (isComix ? "?source=comix&imageUrl=" : "?imageUrl=") +
-    encodeURIComponent(url)
-  );
+  if (!/pstatic\.net|webtoons\.com/i.test(url)) return url;
+  return imageProxyUrl(url);
 };
 
 /** Never let an autocomplete placeholder become a saved synopsis. */
