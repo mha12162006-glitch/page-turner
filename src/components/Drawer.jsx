@@ -828,6 +828,16 @@ export default function Drawer({
           />
         </L>
         {!readOnly && (
+          <button
+            type="button"
+            onClick={() => autoTagFromSynopsis()}
+            disabled={!String(f.title || "").trim() && !String(f.synopsis || "").trim()}
+            className="rounded-xl bg-plum text-white px-4 py-2 text-sm font-bold disabled:opacity-50"
+          >
+            Auto-fill Tags from Synopsis
+          </button>
+        )}
+        {!readOnly && (
           <div className="rounded-2xl bg-plum/10 p-4 space-y-2">
             <div>
               <p className="font-bold">✨ Smart paste / auto-tag</p>
@@ -857,14 +867,6 @@ export default function Drawer({
                 className="rounded-xl bg-plum/15 px-4 py-2 text-sm font-bold disabled:opacity-50"
               >
                 ⤓ Use pasted info
-              </button>
-              <button
-                type="button"
-                onClick={() => autoTagFromSynopsis()}
-                disabled={!String(f.title || "").trim() && !String(f.synopsis || "").trim()}
-                className="rounded-xl bg-plum text-white px-4 py-2 text-sm font-bold disabled:opacity-50"
-              >
-                ✨ Auto-fill Tags from Synopsis
               </button>
             </div>
           </div>
