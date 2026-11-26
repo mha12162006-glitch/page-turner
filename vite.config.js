@@ -16,9 +16,11 @@ function webtoonApi() {
         if (req.method !== "GET") return next();
         const url = new URL(req.url || "", "http://localhost");
         // All modes (search, detail and image proxy) share the Vercel handler:
-        // ?q=..., ?url=... / ?titleNo=..., and ?imageUrl=...
-        // Cookie/Referer detail headers and encodeImageUrl() live there too,
-        // so `npm run dev` and Vercel behave identically.
+        // ?q=..., ?url=... / ?titleNo=..., ?imageUrl=..., and Comix's
+        // ?source=comix&q=..., ?source=comix&slug=... / &url=..., or
+        // ?source=comix&imageUrl=... for its covers.
+        // Signed tokens, cookie/Referer headers and encodeImageUrl() live there
+        // too, so `npm run dev` and Vercel behave identically.
         req.query = Object.fromEntries(url.searchParams);
         Promise.resolve(webtoonSearch(req, res)).catch((error) => {
           console.error("WEBTOON API failed:", error);

@@ -28,6 +28,8 @@ const mockApis = (
     kitsu = () => [],
     webtoon = () => [],
     webtoonDetail = () => ({}),
+    comix = () => [],
+    comixDetail = () => ({}),
     mangadex = () => [],
     mangadexAggregate = () => ({ volumes: {} }),
     muDetail = null,
@@ -41,6 +43,20 @@ const mockApis = (
     const url = urlOf(input);
     if (url.includes("/api/webtoon-search")) {
       const params = new URL(url, "http://localhost").searchParams;
+      if (params.get("source") === "comix") {
+        if (params.has("slug") || params.has("url")) {
+          calls.comixDetail = (calls.comixDetail || 0) + 1;
+          calls.comixDetailKeys = [
+            ...(calls.comixDetailKeys || []),
+            params.get("slug") || params.get("url")
+          ];
+          return response({
+            result: comixDetail(params.get("slug") || params.get("url"))
+          });
+        }
+        calls.comix = (calls.comix || 0) + 1;
+        return response({ results: comix(params.get("q")) });
+      }
       if (params.has("url")) {
         calls.webtoonDetail = (calls.webtoonDetail || 0) + 1;
         calls.webtoonDetailUrls = [
@@ -1026,5 +1042,100 @@ describe("multi-source title search", () => {
     );
     const rows = await searchSeries("Uriah");
     expect(rows.map((r) => r.source)).toEqual(["Kitsu"]);
+  });
+
+  it("maps Comix search rows with the English alt-title and curated chips", async () => {
+    const comixRow = {
+      title: "The Villainess Licks the Ice Prince Clean",
+      altTitles: [
+        "Akujo wa Kouri no Prince-kun wo Name Tsukusu",
+        "悪女は氷のプリンスくんを舐めつくす"
+      ],
+      cover_url: "https://comix.to/images/covers/11/2f/cover.jpg",
+      synopsis: "Koyuki is reincarnated as a villainess and must be killed.",
+      pub_status: "finished",
+      total_chapters: 33,
+      // Real Comix search rows only know the generic manga type.
+      format: "Manga",
+      contentRating: "safe",
+      comix_hid: "mjmlm",
+      detail_url: "https://comix.to/title/mjmlm-akujo"
+    };
+    const calls = {};
+    vi.stubGlobal("fetch", mockApis({ comix: () => [comixRow] }, calls));
+
+    const rows = await searchSeries("Akujo wa Kouri no Prince-kun wo Name Tsukusu");
+    expect(calls.comix).toBe(1);
+    const picked = rows.find((row) => row.source === "Comix");
+    expect(picked).toMatchObject({
+      title: "The Villainess Licks the Ice Prince Clean",
+      anilist_id: null,
+      _source_id: "mjmlm",
+      format: "Manga",
+      pub_status: "Completed",
+      total_chapters: 33
+    });
+    expect(picked.read_url ?? "").toBe("");
+    expect(picked._aliases).toContain(
+      "Akujo wa Kouri no Prince-kun wo Name Tsukusu"
+    );
+    expect(picked.synopsis).toContain("Koyuki is reincarnated");
+    expect(picked.genres.every((chip) => chip.length < 40)).toBe(true);
+    expect(picked.tags.every((chip) => chip.length < 40)).toBe(true);
+
+    const detail = {
+      title: "Akujo wa Kouri no Prince-kun wo Name Tsukusu",
+      altTitles: ["The Villainess Licks the Ice Prince Clean"],
+      cover_url: "https://comix.to/images/covers/11/2f/cover.jpg",
+      synopsis: "Koyuki opens an ice cream shop in a new world.",
+      pub_status: "finished",
+      total_chapters: 33,
+      genres: [{ title: "Fantasy" }, { title: "Romance" }],
+      tags: [
+        { title: "Full Color" },
+        { title: "Webtoon/Webcomic" },
+        { title: "Ice Cream" },
+        { title: "Stepsibling Love" }
+      ],
+      contentRating: "safe",
+      comix_hid: "mjmlm"
+    };
+    const detailCalls = {};
+    vi.stubGlobal("fetch", mockApis({ comixDetail: () => detail }, detailCalls));
+    const full = await completeResult(picked);
+    expect(detailCalls.comixDetail).toBe(1);
+    expect(detailCalls.comixDetailKeys[0]).toBe("mjmlm");
+    expect(full.title).toBe("The Villainess Licks the Ice Prince Clean");
+    expect(full.pub_status).toBe("Completed");
+    expect(full.total_chapters).toBe(33);
+    expect(full.format).toBe("Webtoon");
+    expect(full.genres).toEqual(["Fantasy", "Romance"]);
+    expect(full.tags.every((chip) => chip.length < 40)).toBe(true);
+    expect(full.tags).not.toContain("Ice Cream");
+    expect(full.tags).not.toContain("Stepsibling Love");
+    expect(full.warnings.split(", ").filter(Boolean).every((chip) =>
+      WARNING_PRESETS.includes(chip)
+    )).toBe(true);
+    expect(full.read_url ?? "").toBe("");
+  });
+
+  it("dedupes Comix results by English alt-title", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        mangaUpdates: () => [
+          { record: { series_id: 555, title: "Uriah", latest_chapter: "142" } }
+        ],
+        comix: () => [
+          {
+            title: "They Call Me Uriah",
+            altTitles: ["Uriah", "ウリア"],
+            comix_hid: "u1"
+          }
+        ]
+      })
+    );
+    const rows = await searchSeries("Uriah");
+    expect(rows.map((row) => row.source)).toEqual(["MangaUpdates"]);
   });
 });

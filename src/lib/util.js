@@ -92,11 +92,11 @@ export const isHttp = (u) => /^https?:\/\//i.test((u || "").trim());
 export const httpUrl = (u) => (isHttp(u) ? u.trim() : "");
 
 /**
- * WEBTOON's image CDN answers browser <img> requests with 403 because an <img>
- * cannot set the required Referer. Rewrite every WEBTOON-owned cover (CDN or
- * webtoons.com) to our same-origin proxy; the server adds the Referer and
- * streams the bytes. Already-proxied URLs are left alone. In Node tests (no
- * window) the source URL is untouched so payload assertions stay readable.
+ * WEBTOON's image CDN and Comix covers answer browser <img> requests without
+ * the headers they expect. Rewrite those covers to our same-origin proxy; the
+ * server adds the Referer and streams the bytes. Already-proxied URLs are left
+ * alone. In Node tests (no window) the source URL is untouched so payload
+ * assertions stay readable.
  */
 const isProxiedCover = (value) =>
   /\/api\/webtoon-search\?imageUrl=/i.test(String(value || ""));
@@ -106,10 +106,17 @@ export const proxyCover = (u) => {
   if (isProxiedCover(raw)) return raw;
   const url = httpUrl(raw);
   if (!url || typeof window === "undefined") return url;
-  if (!/pstatic\.net|webtoons\.com/i.test(url)) return url;
+  let isComix = false;
+  try {
+    isComix = /(^|\.)comix\.to$/i.test(new URL(url).hostname);
+  } catch {
+    isComix = false;
+  }
+  if (!isComix && !/pstatic\.net|webtoons\.com/i.test(url)) return url;
   return (
     window.location.origin +
-    "/api/webtoon-search?imageUrl=" +
+    "/api/webtoon-search" +
+    (isComix ? "?source=comix&imageUrl=" : "?imageUrl=") +
     encodeURIComponent(url)
   );
 };

@@ -153,7 +153,7 @@ export default function Drawer({
   /**
    * One entry point for every source. Search rows and detail responses are
    * normalized before they reach here, so AniList, MangaUpdates, Kitsu,
-   * WEBTOON and MangaDex all fill the same fields in exactly the same way.
+   * WEBTOON, MangaDex and Comix all fill the same fields in exactly the same way.
    */
   const applyMetadataToForm = (metadata) => {
     if (!metadata) return;
@@ -427,7 +427,7 @@ export default function Drawer({
           <div className="relative">
             <input
               className="inp"
-              placeholder="Search titles (AniList, MangaUpdates, Kitsu, WEBTOON, MangaDex)"
+              placeholder="Search titles (AniList, MangaUpdates, Kitsu, WEBTOON, MangaDex, Comix)"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -468,7 +468,9 @@ export default function Drawer({
                             ? "bg-blue-500/15"
                             : r.source === "MangaDex"
                               ? "bg-emerald-500/15"
-                              : "bg-plum/10")
+                              : r.source === "Comix"
+                                ? "bg-amber-500/15"
+                                : "bg-plum/10")
                         }
                       >
                         {r.source}

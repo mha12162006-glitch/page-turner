@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import handler, {
+  comixToken,
+  decodeComixPayload,
   detailUrlFor,
   encodeImageUrl,
   mergeDetail,
@@ -418,5 +420,169 @@ describe("WEBTOON handler modes", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
     expect(JSON.parse(res.body).error).toMatch(/Only WEBTOON cover images/);
+  });
+});
+
+const COMIX_COVER =
+  "/images/covers/11/2f/112fd7dfaa594229209a611b2dbc8f0c21cad000.jpg";
+const COMIX_ITEM = {
+  id: 80010,
+  hid: "mjmlm",
+  title: "Akujo wa Kouri no Prince-kun wo Name Tsukusu",
+  type: "manga",
+  originalLanguage: "ja",
+  altTitles: [
+    "The Villainess Licks the Ice Prince Clean",
+    "悪女は氷のプリンスくんを舐めつくす"
+  ],
+  poster: { medium: COMIX_COVER + "@280", large: COMIX_COVER },
+  latestChapter: 31,
+  finalChapter: 33,
+  status: "finished",
+  synopsisHtml:
+    "Koyuki finds herself reincarnated as the villainess. <br><b>Original Webtoon:</b> <a href=\"https://example.com\">Source</a>",
+  contentRating: "safe",
+  url: "/title/mjmlm-akujo-wa-kouri-no-prince-kun-wo-name-tsukusu"
+};
+const COMIX_DETAIL = {
+  ...COMIX_ITEM,
+  genres: [{ title: "Fantasy" }, { title: "Romance" }],
+  demographics: [{ title: "Josei" }],
+  tags: [
+    { title: "Full Color" },
+    { title: "Webtoon/Webcomic" },
+    { title: "Ice Cream" },
+    { title: "Stepsibling Love" }
+  ],
+  type: "manga",
+  originalLanguage: "ja"
+};
+
+describe("Comix search and detail proxy", () => {
+  const mockRes = () => ({
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    setHeader(key, value) {
+      this.headers[key] = value;
+    },
+    end(body) {
+      this.body = body;
+      return this;
+    }
+  });
+  const req = (url) => ({ method: "GET", url });
+  const gif = Buffer.from(
+    "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+    "base64"
+  );
+
+  it("signs search requests with the site key and keeps English alt-titles", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({ status: "ok", result: { items: [COMIX_ITEM] } })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const q = "The Villainess Licks the Ice Prince Clean";
+    expect(
+      comixToken(
+        "/manga?content_rating[0]=safe&content_rating[1]=suggestive&keyword=" +
+          q +
+          "&limit=28&order[relevance]=desc&page=1"
+      )
+    ).toBe("fdj.ZBXQFp-DinskdVVq");
+
+    const res = mockRes();
+    await handler(req("/api/webtoon-search?source=comix&q=" + encodeURIComponent(q)), res);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/v1/manga?");
+    expect(url.match(/_=fdj\./g)).toHaveLength(1);
+    expect(url).toContain("_=fdj.ZBXQFp-DinskdVVq");
+    expect(url).toContain("keyword=The+Villainess+Licks+the+Ice+Prince+Clean");
+    expect(options.headers["User-Agent"]).toContain("Chrome/131.0.0.0");
+    expect(options.headers["X-Requested-With"]).toBe("XMLHttpRequest");
+    expect(options.headers.Referer).toBe(
+      "https://comix.to/browse?q=The+Villainess+Licks+the+Ice+Prince+Clean"
+    );
+
+    const row = JSON.parse(res.body).results[0];
+    expect(row).toMatchObject({
+      title: "The Villainess Licks the Ice Prince Clean",
+      cover_url: "https://comix.to" + COMIX_COVER,
+      pub_status: "Completed",
+      total_chapters: 33,
+      // Search rows only know Comix's generic type; detail tags set Webtoon.
+      format: "Manga",
+      contentRating: "safe",
+      comix_hid: "mjmlm"
+    });
+    expect(row.synopsis).toContain("Koyuki finds herself reincarnated");
+    expect(row.synopsis).not.toMatch(/<[^>]+>/);
+    expect(row.altTitles).toContain(
+      "Akujo wa Kouri no Prince-kun wo Name Tsukusu"
+    );
+    expect(row.altTitles).toContain(
+      "The Villainess Licks the Ice Prince Clean"
+    );
+  });
+
+  it("decrypts the site's XOR-protected detail envelope", () => {
+    // Small envelope encoded with the same public key and a 7-byte stream offset.
+    const envelope = JSON.stringify({
+      e: "AAfSqxMlKyhr0jqwpVbwBft_AFFET9NtTxRrduDSgNndW_WVHBlA94EWkDSPAB4B"
+    });
+    expect(decodeComixPayload(envelope)).toEqual({
+      status: "ok",
+      result: { title: "Encrypted" }
+    });
+  });
+
+  it("maps full detail metadata including genres, tags and status", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ status: "ok", result: COMIX_DETAIL })
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = mockRes();
+    await handler(req("/api/webtoon-search?source=comix&slug=mjmlm"), res);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/v1/manga/mjmlm?_=fdj.9sejh7Z0ewwC-HRk");
+    expect(options.headers.Referer).toBe("https://comix.to/title/mjmlm");
+    expect(JSON.parse(res.body).result).toMatchObject({
+      title: "The Villainess Licks the Ice Prince Clean",
+      cover_url: "https://comix.to" + COMIX_COVER,
+      pub_status: "Completed",
+      total_chapters: 33,
+      genres: ["Fantasy", "Romance", "Josei"],
+      tags: ["Full Color", "Webtoon/Webcomic", "Ice Cream", "Stepsibling Love"],
+      contentRating: "safe",
+      format: "Webtoon",
+      comix_hid: "mjmlm"
+    });
+  });
+
+  it("proxies Comix covers with a Comix Referer", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      headers: { get: () => "image/jpeg" },
+      arrayBuffer: async () => gif.buffer.slice(gif.byteOffset, gif.byteOffset + gif.byteLength)
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = mockRes();
+    const cover = "https://comix.to" + COMIX_COVER;
+    await handler(
+      req(
+        "/api/webtoon-search?source=comix&imageUrl=" + encodeURIComponent(cover)
+      ),
+      res
+    );
+    expect(res.headers["Content-Type"]).toBe("image/jpeg");
+    expect(fetchMock.mock.calls[0][0]).toBe(cover);
+    expect(fetchMock.mock.calls[0][1].headers.Referer).toBe("https://comix.to/");
+    expect(Buffer.from(res.body).equals(gif)).toBe(true);
   });
 });
