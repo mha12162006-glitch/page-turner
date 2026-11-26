@@ -6,6 +6,7 @@ import {
   sb,
   SHARED_SERIES_COLUMNS
 } from "../lib/supabase";
+import { saveErrorMessage, seriesWritePayload } from "../lib/seriesRow";
 import { FORMATS, relWith, same, STATUS, statusLabel } from "../lib/util";
 import { latestPerSeries, seriesKey } from "../lib/search";
 import AddFromFriend from "../components/AddFromFriend";
@@ -149,17 +150,20 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
       setDupe([dup]);
       return false;
     }
-    const { data, error } = await sb
-      .from("series")
-      .insert({
-        ...row,
-        status: status || "want",
-        chapter: chapter == null ? null : chapter,
-        source: "From " + (who.display_name || "a friend") + " list",
-        position: mine.reduce((m, i) => Math.max(m, i.position), -1) + 1
-      })
-      .select("id")
-      .single();
+    const payload = seriesWritePayload(row, me.id, {
+      status: status || "want",
+      chapter,
+      source: "From " + (who.display_name || "a friend") + " list",
+      position: mine.reduce((m, i) => Math.max(m, i.position), -1) + 1
+    });
+    let result;
+    try {
+      result = await sb.from("series").insert(payload).select("id").single();
+    } catch (error) {
+      say(saveErrorMessage(error));
+      return false;
+    }
+    const { data, error } = result;
     if (error) {
       if (isUniqueViolation(error)) {
         const existing = await findExistingSeries(me.id, row, []);
@@ -169,8 +173,7 @@ export default function Shared({ uid, sid, dark, setDark, me }) {
           return false;
         }
       }
-      console.error("Adding from a friend failed:", error);
-      say("Could not add that series. Please try again.");
+      say(saveErrorMessage(error));
       return false;
     }
     const cs = chs.filter((c) => c.series_id === x.id);

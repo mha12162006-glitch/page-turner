@@ -30,6 +30,7 @@ import {
 import { attachOwnNotes, privateNoteRow, stripNotes } from "../lib/notes";
 import { ORDER, positionsFor, readOrder, sortItems, writeOrder } from "../lib/listOrder";
 import { resolveCustom } from "../lib/customPresets";
+import { saveErrorMessage, seriesWritePayload } from "../lib/seriesRow";
 import { GENRE_PRESETS, TROPE_PRESETS } from "../lib/tags";
 import { WARNING_PRESETS } from "../lib/warnings";
 import AddFromFriend from "../components/AddFromFriend";
@@ -211,30 +212,30 @@ export default function Tracker({ user, dark, setDark, th }) {
         return;
       }
     }
-    const r = id
-      ? await sb.from("series").update(rest).eq("id", id).select("id").single()
-      : await sb
-          .from("series")
-          .insert({
-            ...rest,
-            position: Math.max(-1, ...items.map((i) => i.position)) + 1
-          })
-          .select("id")
-          .single();
+    const payload = seriesWritePayload(
+      rest,
+      user.id,
+      id ? {} : { position: Math.max(-1, ...items.map((i) => i.position)) + 1 }
+    );
+    let r;
+    try {
+      r = id
+        ? await sb.from("series").update(payload).eq("id", id).select("id").single()
+        : await sb.from("series").insert(payload).select("id").single();
+    } catch (error) {
+      say(saveErrorMessage(error, !!id));
+      return;
+    }
     if (r.error) {
-      if (!id && isUniqueViolation(r.error)) {
+      const error = r.error;
+      if (!id && isUniqueViolation(error)) {
         const dup = await findExistingSeries(user.id, rest, []);
         if (dup) {
           setDupe([dup]);
           return;
         }
       }
-      console.error("Saving series failed:", r.error);
-      say(
-        id
-          ? "Could not save those changes. Please try again."
-          : "Could not add that series. Please try again."
-      );
+      say(saveErrorMessage(error, !!id));
       return;
     }
 
@@ -716,17 +717,20 @@ export default function Tracker({ user, dark, setDark, th }) {
       setDupe([dup]);
       return false;
     }
-    const { data, error } = await sb
-      .from("series")
-      .insert({
-        ...row,
-        status: status || "want",
-        chapter: chapter == null ? null : chapter,
-        source: "From " + (friend.name || "a friend") + " list",
-        position: Math.max(-1, ...items.map((i) => i.position)) + 1
-      })
-      .select("id")
-      .single();
+    const payload = seriesWritePayload(row, user.id, {
+      status: status || "want",
+      chapter,
+      source: "From " + (friend.name || "a friend") + " list",
+      position: Math.max(-1, ...items.map((i) => i.position)) + 1
+    });
+    let result;
+    try {
+      result = await sb.from("series").insert(payload).select("id").single();
+    } catch (error) {
+      say(saveErrorMessage(error));
+      return false;
+    }
+    const { data, error } = result;
     if (error) {
       if (isUniqueViolation(error)) {
         const existing = await findExistingSeries(user.id, row, []);
@@ -737,8 +741,7 @@ export default function Tracker({ user, dark, setDark, th }) {
           return false;
         }
       }
-      console.error("Adding from a friend failed:", error);
-      say("Could not add that series. Please try again.");
+      say(saveErrorMessage(error));
       return false;
     }
     const sourceIds = liveFs

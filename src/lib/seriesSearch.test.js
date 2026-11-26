@@ -26,6 +26,7 @@ const mockApis = (
     anilist = () => [],
     mangaUpdates = () => [],
     kitsu = () => [],
+    webtoon = () => [],
     muDetail = null,
     kitsuDetail = null,
     kitsuCategories = null,
@@ -35,6 +36,11 @@ const mockApis = (
 ) =>
   vi.fn(async (input, options = {}) => {
     const url = urlOf(input);
+    if (url.includes("/api/webtoon-search")) {
+      calls.webtoon = (calls.webtoon || 0) + 1;
+      const q = new URL(url, "http://localhost").searchParams.get("q");
+      return response({ results: webtoon(q) });
+    }
     if (url.includes("graphql.anilist.co")) {
       const body = JSON.parse(options.body);
       return response({ data: { Page: { media: anilist(body.variables?.s) } } });
@@ -543,6 +549,73 @@ describe("multi-source title search", () => {
     expect(calls.kitsu).toBe(2);
     expect(calls.mu).toBe(2);
     expect(full.total_chapters).toBe(48);
+  });
+
+  it("maps direct WEBTOON results into the same cleaned fields", async () => {
+    const calls = {};
+    vi.stubGlobal(
+      "fetch",
+      mockApis(
+        {
+          anilist: () => [],
+          mangaUpdates: () => [],
+          kitsu: () => [],
+          webtoon: () => [
+            {
+              title: "Don't Enter the House Pool",
+              cover_url: "https://webtoon-phinf.pstatic.net/thumb.jpg",
+              author: "Toffuo",
+              genre: "Horror",
+              webtoon_id: "7580",
+              type: "Webtoon"
+            }
+          ]
+        },
+        calls
+      )
+    );
+    const [row] = await searchSeries("Don't Enter the House Pool");
+    expect(calls.webtoon).toBe(1);
+    expect(row.source).toBe("WEBTOON");
+    expect(row.anilist_id).toBe(null);
+    expect(row._source_id).toBe("7580");
+    expect(row.format).toBe("Webtoon");
+    expect(row.title).toBe("Don't Enter the House Pool");
+    expect(row.cover_url).toBe("https://webtoon-phinf.pstatic.net/thumb.jpg");
+    expect(row.synopsis).toContain("WEBTOON Horror series by Toffuo.");
+    expect(row.genres).toEqual(["Horror"]);
+    expect(row.chapter).toBe(0);
+    expect(row.total_chapters).toBe(null);
+    expect(Object.hasOwn(row, "read_url")).toBe(false);
+  });
+
+  it("keeps Canvas titles searchable without inventing preset chips", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        anilist: () => [],
+        mangaUpdates: () => [],
+        kitsu: () => [],
+        webtoon: () => [
+          {
+            title: "City of Light",
+            cover_url: "https://webtoon-phinf.pstatic.net/city.jpg",
+            author: "IsaacTheRaccoon",
+            genre: "Canvas",
+            webtoon_id: "12345",
+            type: "Webtoon"
+          }
+        ]
+      })
+    );
+    const [row] = await searchSeries("City of Light");
+    expect(row.source).toBe("WEBTOON");
+    expect(row.format).toBe("Webtoon");
+    expect(row.genres).toEqual([]);
+    expect(row.tags).toEqual([]);
+    expect(row.warnings).toBe("");
+    expect(row.synopsis).toBe("WEBTOON Canvas series by IsaacTheRaccoon.");
+    expect(row.read_url ?? "").toBe("");
   });
 
   it("deduplicates a title found everywhere and keeps the AniList id", async () => {

@@ -5,10 +5,10 @@ import { joinWarnings } from "./warnings";
 import { detectFormat, norm } from "./util";
 
 /**
- * Title search across three free sources. AniList stays first so existing
- * anilist_id links keep working; MangaUpdates and Kitsu cover Western comics
- * and webtoons that AniList excludes by country of origin. Every failure is
- * isolated so one unavailable source never blocks the others.
+ * Title search across four free sources. AniList stays first so existing
+ * anilist_id links keep working; MangaUpdates, Kitsu and the WEBTOON API cover
+ * Western comics and webtoons that AniList excludes by country of origin.
+ * Every failure is isolated so one unavailable source never blocks the others.
  */
 
 const asArray = (value) =>
@@ -246,6 +246,44 @@ export async function searchKitsu(query, custom = {}) {
     .filter((row) => row.title);
 }
 
+/**
+ * Direct WEBTOON results come from our own /api/webtoon-search function, which
+ * is a Vercel handler locally mirrored by a Vite middleware. The compact
+ * synopsis gives the shared mapper a genre/author pool without inventing any
+ * long source sentences, and read_url is deliberately left untouched.
+ */
+export async function searchWebtoon(query, custom = {}) {
+  const data = await jsonGet(
+    "/api/webtoon-search?q=" + encodeURIComponent(query),
+    { headers: { Accept: "application/json" } }
+  );
+  return asArray(data?.results)
+    .map((r) => {
+      const genre = text(r.genre);
+      const author = text(r.author);
+      const labels = [genre, author].filter(Boolean);
+      const synopsis =
+        text(r.synopsis) ||
+        [
+          genre ? "WEBTOON " + genre + " series" : "WEBTOON series",
+          author ? "by " + author + "." : ""
+        ]
+          .filter(Boolean)
+          .join(" ");
+      return standard({
+        title: r.title,
+        cover_url: r.cover_url,
+        synopsis,
+        genres: genre ? [genre] : [],
+        labels,
+        format: "Webtoon",
+        source_id: r.webtoon_id,
+        custom
+      });
+    })
+    .filter((row) => row.title);
+}
+
 /** MangaUpdates/Kitsu picks always have a detail endpoint worth checking. */
 export function needsSeriesDetail(row = {}) {
   return (
@@ -341,21 +379,23 @@ export async function completeResult(row, custom = {}) {
   return row;
 }
 
-/** AniList first, then MangaUpdates and Kitsu, deduped by normalized title. */
+/** AniList first, then MangaUpdates/Kitsu/WEBTOON, deduped by title. */
 export async function searchSeries(query, custom = {}) {
   const q = text(query);
   if (q.length < 3) return [];
-  const [anilist, mangaUpdates, kitsu] = await Promise.all([
+  const [anilist, mangaUpdates, kitsu, webtoon] = await Promise.all([
     searchAniList(q, custom).catch(() => []),
     searchMangaUpdates(q, custom).catch(() => []),
-    searchKitsu(q, custom).catch(() => [])
+    searchKitsu(q, custom).catch(() => []),
+    searchWebtoon(q, custom).catch(() => [])
   ]);
   const out = [];
   const seen = new Set();
   for (const [rows, source] of [
     [anilist, "AniList"],
     [mangaUpdates, "MangaUpdates"],
-    [kitsu, "Kitsu"]
+    [kitsu, "Kitsu"],
+    [webtoon, "WEBTOON"]
   ]) {
     for (const row of rows || []) {
       const key = norm(row?.title);

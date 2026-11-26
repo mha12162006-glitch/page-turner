@@ -350,11 +350,11 @@ export default function Drawer({
           <div className="relative">
             <input
               className="inp"
-              placeholder="Search titles (AniList, MangaUpdates, Kitsu)"
+              placeholder="Search titles (AniList, MangaUpdates, Kitsu, WEBTOON)"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
-            {(busy || res.length > 0) && (
+            {(busy || !!q.trim()) && (
               <div
                 className={
                   "absolute z-10 mt-1 w-full max-h-80 overflow-y-auto " +
@@ -383,12 +383,40 @@ export default function Drawer({
                       <span className="text-xs opacity-60">
                         {r.format} · {r.genres.slice(0, 3).join(", ")}
                       </span>
-                      <span className="ml-2 rounded-full bg-plum/10 px-1.5 py-0.5 text-[10px] font-bold opacity-70">
+                      <span
+                        className={
+                          "ml-2 rounded-full px-1.5 py-0.5 text-[10px] font-bold opacity-70 " +
+                          (r.source === "WEBTOON" ? "bg-blue-500/15" : "bg-plum/10")
+                        }
+                      >
                         {r.source}
                       </span>
                     </span>
                   </button>
                 ))}
+                {!!q.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setF({
+                        ...blank,
+                        title: q.trim(),
+                        genres: "",
+                        tags: "",
+                        warnings: "",
+                        media: ""
+                      });
+                      setChars([]);
+                      setAutoWarnings("");
+                      setWarnTouched(false);
+                      setRes([]);
+                      setQ("");
+                    }}
+                    className="w-full border-t border-plum/10 p-3 text-left text-sm font-bold text-plum hover:bg-plum/10"
+                  >
+                    {`+ Add "${q.trim()}" manually`}
+                  </button>
+                )}
               </div>
             )}
           </div>
