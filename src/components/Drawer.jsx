@@ -340,12 +340,21 @@ export default function Drawer({
     setWarnTouched(false);
   };
   useEffect(() => {
-    if (!isNew || q.length < 3) return setRes([]);
+    if (!isNew || q.length < 3) {
+      setBusy(false);
+      setRes([]);
+      return;
+    }
     setBusy(true);
+    setRes([]);
     let live = true;
     const t = setTimeout(
       () =>
-        searchSeries(q, customFields)
+        searchSeries(q, customFields, (rows) => {
+          // Show each database's results as soon as it settles instead of
+          // waiting for the slowest/failing source.
+          if (live) setRes(rows);
+        })
           .then((rows) => live && setRes(rows))
           .catch(() => live && setRes([]))
           .finally(() => live && setBusy(false)),

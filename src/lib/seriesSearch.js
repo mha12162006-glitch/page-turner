@@ -5,11 +5,12 @@ import { joinWarnings } from "./warnings";
 import { detectFormat, isPlaceholderSynopsis, norm, proxyCover } from "./util";
 
 /**
- * Title search across seven free sources. AniList stays first so existing
+ * Title search across six free sources. AniList stays first so existing
  * anilist_id links keep working; MangaUpdates, Kitsu, WEBTOON, MangaDex and
  * Jikan (MyAnimeList) cover Western comics, webtoons and obscure fan-translated
  * titles that AniList excludes. Jikan also indexes English and Romaji synonyms.
- * Every failure is isolated so one unavailable source never blocks the others.
+ * Every source has its own timeout and failure boundary, so one unavailable
+ * API can never hide the results from the others.
  */
 
 const asArray = (value) =>
@@ -263,9 +264,45 @@ function fillFrom(row, extra) {
   return out;
 }
 
-async function jsonGet(url, options) {
+// Keep one slow/broken database from holding the whole dropdown hostage.
+const SEARCH_TIMEOUT_MS = 8000;
+
+const withTimeout = (promise, ms, label) => {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(label + " search timed out after " + ms + "ms")),
+      ms
+    );
+  });
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+};
+
+/** Run one source in its own try/catch + timeout. It always resolves to rows. */
+async function runSource(label, task) {
+  try {
+    return await withTimeout(
+      Promise.resolve().then(task),
+      SEARCH_TIMEOUT_MS,
+      label
+    );
+  } catch (err) {
+    console.warn(label + " search failed:", err?.message || err);
+    return [];
+  }
+}
+
+async function jsonGet(url, options = {}) {
   const r = await fetch(url, options);
   if (!r.ok) throw new Error("HTTP " + r.status);
+  // A dev server or upstream outage can return HTML with a 200 status. Fail
+  // fast with a readable message instead of letting .json() break a source.
+  const type = r.headers?.get?.("content-type") || "";
+  if (type && !/json/i.test(type)) {
+    throw new Error("Expected JSON but got " + type);
+  }
   return r.json();
 }
 
@@ -648,32 +685,23 @@ export async function completeResult(row, custom = {}) {
   return row;
 }
 
-/** AniList first, then MangaUpdates/Kitsu/WEBTOON/MangaDex/MAL, deduped by title. */
-export async function searchSeries(query, custom = {}) {
-  const q = text(query);
-  if (q.length < 3) return [];
-  const [anilist, mangaUpdates, kitsu, webtoon, mangadex, jikan] =
-    await Promise.all([
-      searchAniList(q, custom).catch(() => []),
-      searchMangaUpdates(q, custom).catch(() => []),
-      searchKitsu(q, custom).catch(() => []),
-      searchWebtoon(q, custom).catch(() => []),
-      searchMangaDex(q, custom).catch(() => []),
-      searchJikan(q, custom).catch(() => [])
-    ]);
+const SOURCE_ORDER = [
+  "AniList",
+  "MangaUpdates",
+  "Kitsu",
+  "WEBTOON",
+  "MangaDex",
+  "MAL"
+];
+
+/** Merge whatever sources have settled so far, keeping the source priority. */
+const mergeSearchRows = (bySource) => {
   const out = [];
   const seen = new Set();
   const keysOf = (row) =>
     [row?.title, ...asArray(row?._aliases)].map(norm).filter(Boolean);
-  for (const [rows, source] of [
-    [anilist, "AniList"],
-    [mangaUpdates, "MangaUpdates"],
-    [kitsu, "Kitsu"],
-    [webtoon, "WEBTOON"],
-    [mangadex, "MangaDex"],
-    [jikan, "MAL"]
-  ]) {
-    for (const row of rows || []) {
+  for (const source of SOURCE_ORDER) {
+    for (const row of bySource[source] || []) {
       const keys = keysOf(row);
       if (!keys.length || keys.some((key) => seen.has(key))) continue;
       keys.forEach((key) => seen.add(key));
@@ -681,4 +709,50 @@ export async function searchSeries(query, custom = {}) {
     }
   }
   return out;
+};
+
+/**
+ * AniList first, then MangaUpdates/Kitsu/WEBTOON/MangaDex/MAL, deduped by
+ * title. All sources run independently through Promise.allSettled(), each
+ * with its own try/catch and timeout. `onUpdate` receives the merged rows as
+ * soon as each source settles, so a slow API never hides the fast ones.
+ */
+export async function searchSeries(query, custom = {}, onUpdate) {
+  const q = text(query);
+  if (q.length < 3) return [];
+  const sources = [
+    ["AniList", () => searchAniList(q, custom)],
+    ["MangaUpdates", () => searchMangaUpdates(q, custom)],
+    ["Kitsu", () => searchKitsu(q, custom)],
+    ["WEBTOON", () => searchWebtoon(q, custom)],
+    ["MangaDex", () => searchMangaDex(q, custom)],
+    ["MAL", () => searchJikan(q, custom)]
+  ];
+  const bySource = {};
+  const publish = () => {
+    if (typeof onUpdate !== "function") return;
+    try {
+      onUpdate(mergeSearchRows(bySource));
+    } catch (err) {
+      console.warn("Search update failed:", err?.message || err);
+    }
+  };
+  const settled = await Promise.allSettled(
+    sources.map(async ([source, task]) => {
+      const rows = await runSource(source, task);
+      bySource[source] = rows;
+      publish();
+      return rows;
+    })
+  );
+  // runSource already catches, but never let an unexpected rejection blank all.
+  for (const result of settled) {
+    if (result.status === "rejected") {
+      console.warn(
+        "Search source failed:",
+        result.reason?.message || result.reason
+      );
+    }
+  }
+  return mergeSearchRows(bySource);
 }

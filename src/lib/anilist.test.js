@@ -38,6 +38,20 @@ afterEach(() => {
 });
 
 describe("AniList reading links", () => {
+  it("sends a syntactically balanced GraphQL search query", async () => {
+    const spy = vi.fn(async () => ({ ...response }));
+    vi.stubGlobal("fetch", spy);
+    await searchAniList("Solo Leveling");
+    const body = JSON.parse(spy.mock.calls[0][1].body);
+    let depth = 0;
+    for (const char of body.query) {
+      if (char === "{") depth += 1;
+      if (char === "}") depth -= 1;
+      expect(depth).toBeGreaterThanOrEqual(0);
+    }
+    expect(depth).toBe(0);
+  });
+
   it("never puts a link into search results", async () => {
     const rows = await searchAniList("Example");
     expect(rows).toHaveLength(1);

@@ -1036,6 +1036,50 @@ describe("multi-source title search", () => {
     expect(rows.map((r) => r.source)).toEqual(["Kitsu"]);
   });
 
+  it("publishes each source as soon as it settles", async () => {
+    const updates = [];
+    vi.stubGlobal(
+      "fetch",
+      mockApis({
+        kitsu: () => [
+          { attributes: { canonicalTitle: "Uriah", posterImage: { medium: "k.jpg" } } }
+        ]
+      })
+    );
+    const rows = await searchSeries("Uriah", {}, (partial) => {
+      updates.push(partial.map((row) => row.source));
+    });
+    expect(updates.length).toBe(6);
+    expect(updates.some((sources) => sources.includes("Kitsu"))).toBe(true);
+    expect(rows.map((r) => r.source)).toContain("Kitsu");
+  });
+
+  it("keeps other sources when one route returns HTML instead of JSON", async () => {
+    const fallback = mockApis({
+      kitsu: () => [
+        { attributes: { canonicalTitle: "Uriah", posterImage: { medium: "k.jpg" } } }
+      ]
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input, options) => {
+        if (urlOf(input).includes("api.jikan.moe")) {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "text/html; charset=utf-8" },
+            json: async () => {
+              throw new SyntaxError("Unexpected token <");
+            }
+          };
+        }
+        return fallback(input, options);
+      })
+    );
+    const rows = await searchSeries("Uriah");
+    expect(rows.map((r) => r.source)).toContain("Kitsu");
+  });
+
   it("maps Jikan/MAL results with English titles, aliases and curated chips", async () => {
     const item = {
       mal_id: 80010,

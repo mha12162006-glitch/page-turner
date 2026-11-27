@@ -18,7 +18,7 @@ const SEARCH_QUERY = [
   "query($s:String){Page(perPage:8){media(search:$s,type:MANGA,",
   "sort:SEARCH_MATCH){id title{romaji english} coverImage{large}",
   " countryOfOrigin genres isAdult tags{name rank isMediaSpoiler} ",
-  "description(asHtml:false) status}}}}"
+  "description(asHtml:false) status}}}"
 ].join("");
 
 const DETAIL_QUERY = [
